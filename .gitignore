@@ -218,3 +218,31 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# OKX GRID: secrets, runtime state and local backups
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+*.p12
+*.pfx
+*.sqlite
+*.sqlite3
+*.db
+state/
+data/
+logs/
+backups/
+secrets/
+private/
+*.bak
+*.backup
+*.tar
+*.tar.gz
+*.zip
+*.pre_*
+*_backup.py
+*_broken*.py
+*.log
