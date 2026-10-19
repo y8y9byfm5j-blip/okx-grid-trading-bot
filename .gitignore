@@ -246,3 +246,14 @@ private/
 *_backup.py
 *_broken*.py
 *.log
+
+# Keep normalized market snapshots, event journals and release exports local.
+runtime/
+*.csv
+*.tsv
+*.jsonl
+*.ndjson
+*.json
+!tests/fixtures/*.json
+SOURCE_REVIEW.txt
+RELEASE_MANIFEST.json

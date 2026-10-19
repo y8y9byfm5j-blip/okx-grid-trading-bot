@@ -2,23 +2,44 @@ name: Validate paper trading code
 on:
   push:
   pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+    env:
+      TRADING_MODE: paper
+      LIVE_TRADING: 'false'
+      PYTHONDONTWRITEBYTECODE: '1'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
-          python-version: '3.12'
-      - name: Compile Python sources
-        run: |
-          find . -type f -name '*.py' -not -path './.git/*' -print0 | xargs -0 -r python -m py_compile
-      - name: Check shell syntax
-        run: |
-          find . -type f -name '*.sh' -not -path './.git/*' -print0 | xargs -0 -r -n 1 bash -n
-      - name: Check prohibited files
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Inspect committed files for private data
         run: python tools/check_repo_safety.py
-      - name: Unit tests
-        run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Compile, validate required suites, test paper and release scenarios
+        run: python tools/validate.py
+      - name: Build exact commit and verify isolated staging
+        if: matrix.python == '3.12'
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from tools.release import build, stage
+          root = Path(os.environ['RUNNER_TEMP'])
+          archive = root / 'paper-release.tar.gz'
+          result = build(os.environ['GITHUB_SHA'], archive)
+          print(stage(archive, result['sha256'], root / 'okx-grid-staging'))
+          PY
