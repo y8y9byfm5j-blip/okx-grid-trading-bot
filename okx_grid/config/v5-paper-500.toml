@@ -1,0 +1,19 @@
+# Explicit shadow/reference profile; does not configure or activate the VPS bot.
+name = "v5-paper-500"
+revision = 1
+mode = "paper"
+leverage = "1"
+
+[policy]
+equity = "500"
+max_bot_capital = "500"
+max_allocation_fraction = "1"
+risk_fraction = "0.01"
+total_risk_fraction = "0.03"
+max_bots = 3
+max_realized_loss_fraction = "0.02"
+min_quote_volume = "10000000"
+max_spread_bps = "10"
+max_market_age = 30
+max_future_seconds = 2
+min_depth_multiple = "5"
