@@ -234,8 +234,10 @@ class PaperTrader:
                 "max_total_planned_risk": str(self.policy.equity * self.policy.total_risk_fraction),
                 "active_bots": len(active)}
 
-    def open(self, bot_id, plan, market, now):
+    def open(self, bot_id, plan, market, now, *, unique_instrument=False):
         paper_only()
+        if type(unique_instrument) is not bool:
+            raise TradingError("INVALID_UNIQUE_INSTRUMENT_FLAG")
         identifier(bot_id)
         with self._transaction():
             self._audit_all()
@@ -246,6 +248,10 @@ class PaperTrader:
             if any(key == bot_id for key, _ in states):
                 raise TradingError("DUPLICATE_BOT")
             active = [s for _, s in states if s["status"] == "OPEN"]
+            # With auto entry, no second bot may claim an active instrument.
+            # This check is inside BEGIN IMMEDIATE, not in a racy preflight.
+            if unique_instrument and any(build_plan(s["plan"]).instrument == plan.instrument for s in active):
+                raise TradingError("INSTRUMENT_ALREADY_ACTIVE")
             reserved = sum((build_plan(s["plan"]).capital for s in active), Decimal(0))
             booked_risk = sum((build_plan(s["plan"]).planned_loss for s in active), Decimal(0))
             # Profits never increase the configured risk/equity budget automatically.
