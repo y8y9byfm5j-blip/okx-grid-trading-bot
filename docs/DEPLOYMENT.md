@@ -1,5 +1,12 @@
 # Servisi kesmeden kaynak incelemesi ve staging
 
+SOL P0/P1 kapısı: [V5_COMPATIBILITY.md](../V5_COMPATIBILITY.md) kanıtları
+tamamlanana kadar VPS'e dağıtım ve aktivasyon yasaktır. Aşağıdaki staging,
+yerel/CI geçici dizin provasıdır. Shadow tasarımı ikinci zamanlayıcı veya ikinci
+Telegram tüketicisi değildir; V5'in aynı girdisini ayrı özel referans defterine
+veren adaptör tasarımıdır. Bu adaptör henüz kaynak üzerinden doğrulanmadı.
+[500 USDT profili](RISK_PROFILE.md) mevcut V5 state'ine uygulanmaz/migre edilmez.
+
 Bu sürümde deploy veya aktivasyon workflow'u yoktur. GitHub Actions yalnızca
 GitHub runner'ında doğrulama ve geçici staging provası yapar. SSH, VPS adresi,
 OKX/Telegram anahtarı veya bulut kimliği kullanmaz.

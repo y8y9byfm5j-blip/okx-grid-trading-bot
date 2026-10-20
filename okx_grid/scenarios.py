@@ -17,9 +17,10 @@ def sample_plan(**updates):
     return GridPlan(**values)
 
 
-def demo():
-    with PaperTrader(":memory:") as trader:
-        trader.open("synthetic", sample_plan(), sample_market(), 1000)
+def demo(*, profile=None, policy=None):
+    with PaperTrader(":memory:", policy, profile=profile) as trader:
+        plan = sample_plan(capital="90") if profile else sample_plan()
+        trader.open("synthetic", plan, sample_market(), 1000)
         trader.tick("synthetic", "down", "98", 1001, 1001)
         trader.tick("synthetic", "up", "102", 1002, 1002)
         return trader.tick("synthetic", "end", "103", 1003, 1003)

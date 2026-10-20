@@ -30,6 +30,38 @@ class CommandLine(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertFalse(json.loads(output)["ledger_checked"])
 
+    def test_explicit_500_profile_is_visible_and_demo_uses_one_portfolio(self):
+        code, output, error = self.call(["--profile", "v5-paper-500", "demo"])
+        self.assertEqual(code, 0, error)
+        values = json.loads(output)
+        self.assertEqual(values["configuration"]["policy"]["equity"], "500")
+        self.assertEqual(values["profile"]["name"], "v5-paper-500")
+        self.assertEqual(values["portfolio"]["initial_equity"], "500")
+        self.assertLess(float(values["bots"][0]["planned_stop_loss"]), 5)
+
+    def test_profile_file_reloaded_and_revision_drift_fails_closed(self):
+        from okx_grid.profiles import __file__ as profile_module
+        source = Path(profile_module).parent / "config" / "v5-paper-500.toml"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            configuration = root / "profile.toml"
+            configuration.write_text(source.read_text())
+            prefix = ["--profile-file", str(configuration), "--state", str(root / "paper.sqlite3")]
+            self.assertEqual(self.call(prefix + ["status"])[0], 0)
+            configuration.write_text(source.read_text().replace("revision = 1", "revision = 2"))
+            code, _, error = self.call(prefix + ["status"])
+            self.assertEqual(code, 2)
+            self.assertEqual(json.loads(error)["error"], "PROFILE_MISMATCH")
+
+    def test_incomplete_custom_profile_is_not_silently_a_2000_demo(self):
+        with tempfile.TemporaryDirectory() as directory:
+            file = Path(directory) / "profile.toml"
+            file.write_text('name="v5-paper-500"\n')
+            code, output, error = self.call(["--profile-file", str(file), "health"])
+            self.assertEqual(code, 2)
+            self.assertFalse(output)
+            self.assertEqual(json.loads(error)["error"], "INCOMPLETE_PAPER_PROFILE")
+
     def test_live_environment_cannot_enable_orders(self):
         with patch.dict("os.environ", {"TRADING_MODE": "live"}):
             code, _, error = self.call(["demo"])

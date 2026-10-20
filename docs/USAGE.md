@@ -1,5 +1,10 @@
 # Paper çekirdeği ve veri sözleşmesi
 
+SOL düzeltmesi: V5 referans çalışması için [açık 500 USDT profilini](RISK_PROFILE.md)
+seçin. Aşağıdaki eski profilesiz örnekler 2.000 USDT sentetik demoya aittir;
+V5 konfigürasyonu olarak sunulmaz. [Uyumluluk matrisi](../V5_COMPATIBILITY.md)
+ve [offline public sözleşmeleri](PUBLIC_DATA_CONTRACTS.md) erişim sınırlarını içerir.
+
 ## Çalıştırma
 
 Depo kökünden `python3 tools/validate.py` tüm kontrolleri çalıştırır. Testler

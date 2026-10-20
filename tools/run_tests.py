@@ -4,7 +4,8 @@ import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUIRED = {"test_domain.py", "test_paper.py", "test_safety.py", "test_release.py", "test_cli.py", "test_radar.py"}
+REQUIRED = {"test_domain.py", "test_paper.py", "test_safety.py", "test_release.py", "test_cli.py", "test_radar.py",
+            "test_v5_profile.py", "test_public_contracts.py"}
 
 
 def main():

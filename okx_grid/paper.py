@@ -29,9 +29,13 @@ def _amount(value):
 
 
 class PaperTrader:
-    def __init__(self, path, policy=None):
+    def __init__(self, path, policy=None, *, profile=None):
         paper_only()
-        self.policy = policy or RiskPolicy()
+        from .profiles import PaperProfile
+        if profile is not None and (not isinstance(profile, PaperProfile) or policy is not None):
+            raise TradingError("AMBIGUOUS_PAPER_CONFIGURATION")
+        self.policy = profile.policy if profile else policy or RiskPolicy()
+        self.config_identity = profile.identity if profile else None
         self._db = None
         try:
             if str(path) != ":memory:":
@@ -75,6 +79,7 @@ class PaperTrader:
                     self._set_meta("policy", self.policy.to_dict())
                     self._set_meta("schema", 1)
                     self._set_meta("halted", False)
+                    self._set_meta("profile", self.config_identity)
                 elif saved != self.policy.to_dict():
                     raise TradingError("POLICY_MISMATCH")
                 if self._meta("schema") != 1 or type(self._meta("halted")) is not bool:
@@ -195,8 +200,39 @@ class PaperTrader:
             raise TradingError("ACCOUNTING_MISMATCH")
 
     def _audit_all(self):
+        if self._meta("policy") != self.policy.to_dict():
+            raise TradingError("POLICY_MISMATCH")
+        if self._meta("profile") != self.config_identity:
+            raise TradingError("PROFILE_MISMATCH")
         for bot_id, state in self._states():
             self._audit(bot_id, state)
+        self._portfolio()
+
+    def _portfolio(self):
+        states = [s for _, s in self._states()]
+        active = [s for s in states if s["status"] == "OPEN"]
+        reserved = sum((build_plan(s["plan"]).capital for s in active), Decimal(0))
+        closed_pnl = sum((_amount(s["realized"]) for s in states if s["status"] == "CLOSED"), Decimal(0))
+        unallocated = self.policy.equity + closed_pnl - reserved
+        cash = unallocated + sum((_amount(s["cash"]) for s in active), Decimal(0))
+        inventory_cost = sum((_amount(p["cost"]) for s in active for p in s["positions"]), Decimal(0))
+        net_inventory = Decimal(0)
+        for state in active:
+            plan = build_plan(state["plan"])
+            quantity = sum((_amount(p["quantity"]) for p in state["positions"]), Decimal(0))
+            net_inventory += quantity * _amount(state["last_price"]) * (1 - plan.slippage_rate) * (1 - plan.fee_rate)
+        realized = sum((_amount(s["realized"]) for s in states), Decimal(0))
+        if unallocated < 0 or cash < 0 or cash + inventory_cost != self.policy.equity + realized:
+            raise TradingError("PORTFOLIO_ACCOUNTING_MISMATCH")
+        return {"initial_equity": str(self.policy.equity), "unallocated_cash": str(unallocated),
+                "reserved_capital": str(reserved), "cash": str(cash), "inventory_cost": str(inventory_cost),
+                "net_inventory_value": str(net_inventory), "equity": str(cash + net_inventory),
+                "realized_pnl": str(realized), "unrealized_pnl": str(net_inventory - inventory_cost),
+                "fees": str(sum((_amount(s["fees"]) for s in states), Decimal(0))),
+                "reserved_planned_risk": str(sum((build_plan(s["plan"]).planned_loss for s in active), Decimal(0))),
+                "max_bot_planned_risk": str(self.policy.equity * self.policy.risk_fraction),
+                "max_total_planned_risk": str(self.policy.equity * self.policy.total_risk_fraction),
+                "active_bots": len(active)}
 
     def open(self, bot_id, plan, market, now):
         paper_only()
@@ -217,6 +253,8 @@ class PaperTrader:
             available_equity = self.policy.equity + min(net_realized, Decimal(0))
             if len(active) >= self.policy.max_bots:
                 raise TradingError("MAX_BOTS")
+            if plan.capital > _amount(self._portfolio()["unallocated_cash"]):
+                raise TradingError("ALLOCATION_LIMIT")
             if reserved + plan.capital > available_equity * self.policy.max_allocation_fraction:
                 raise TradingError("ALLOCATION_LIMIT")
             if booked_risk + plan.planned_loss > available_equity * self.policy.total_risk_fraction:
@@ -230,7 +268,7 @@ class PaperTrader:
             self._db.execute("INSERT INTO bots VALUES (?,?)", (bot_id, canonical(state)))
             self._event("open:" + bot_id, bot_id, "open", now,
                         {"plan_digest": plan.digest, "price": str(market.price), "observed_at": market.observed_at})
-            self._audit(bot_id, state)
+            self._audit_all()
         return self.status(bot_id)
 
     def _fill(self, bot_id, state, plan, slot, side, price, event_id, at):
@@ -300,7 +338,7 @@ class PaperTrader:
                 state.update(last_price=str(price), last_at=observed_at)
                 self._save(bot_id, state)
                 self._event(event_id, bot_id, "tick", observed_at, payload)
-                self._audit(bot_id, state)
+                self._audit_all()
                 realized = sum((_amount(s["realized"]) for _, s in self._states()), Decimal(0))
                 if realized <= -self.policy.equity * self.policy.max_realized_loss_fraction:
                     self._set_meta("halted", True)
@@ -332,4 +370,5 @@ class PaperTrader:
                                "unrealized_pnl": str(net_inventory - cost), "equity": str(equity),
                                "total_pnl": str(equity - plan.capital), "last_at": state["last_at"],
                                "planned_stop_loss": str(plan.planned_loss), "plan_digest": plan.digest})
-            return {"mode": "paper", "halted": self._meta("halted"), "bots": result}
+            return {"mode": "paper", "halted": self._meta("halted"), "bots": result,
+                    "profile": self.config_identity, "portfolio": self._portfolio()}

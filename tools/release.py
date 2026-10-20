@@ -22,7 +22,8 @@ LIVE_PATH = Path("/opt/okx-grid-demo")
 MANIFEST = "RELEASE_MANIFEST.json"
 MAX_ARCHIVE_BYTES = 10 * 1024 * 1024
 REQUIRED = {"okx_grid/__init__.py", "okx_grid/__main__.py", "okx_grid/domain.py", "okx_grid/paper.py",
-            "okx_grid/radar.py", "tools/run_tests.py", "tests/__init__.py"}
+            "okx_grid/radar.py", "tools/run_tests.py", "tests/__init__.py", "okx_grid/profiles.py",
+            "okx_grid/config/v5-paper-500.toml", "okx_grid/public_contracts.py", "V5_COMPATIBILITY.md"}
 
 
 def git(*args, root=ROOT):
@@ -37,7 +38,7 @@ def safe_path(raw):
 
 def permitted(raw):
     path = PurePosixPath(raw)
-    return safe_path(raw) and (raw in {"README.md", ".gitignore"} or path.parts[0] in {"okx_grid", "tests", "tools", "docs"})
+    return safe_path(raw) and (raw in {"README.md", ".gitignore", "V5_COMPATIBILITY.md"} or path.parts[0] in {"okx_grid", "tests", "tools", "docs"})
 
 
 def build(commit, output, root=ROOT, validate=True):

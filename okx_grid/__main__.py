@@ -25,7 +25,10 @@ def read_json(path):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Offline OKX grid paper core; live trading unavailable")
     parser.add_argument("--state", help="Private .sqlite3 path; required for persistent paper operations")
-    parser.add_argument("--policy", help="Risk policy JSON; it must match the saved ledger policy")
+    configuration = parser.add_mutually_exclusive_group()
+    configuration.add_argument("--policy", help="Risk policy JSON; it must match the saved ledger policy")
+    configuration.add_argument("--profile", choices=["v5-paper-500"], help="Explicit versioned shadow paper profile")
+    configuration.add_argument("--profile-file", help="Complete custom paper profile TOML; identity is pinned to the ledger")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("demo", help="Run a synthetic buy/sell scenario entirely in memory")
     sub.add_parser("health", help="Verify the paper guard; audit the ledger if --state is supplied")
@@ -49,11 +52,14 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         paper_only()
-        policy = RiskPolicy(**read_json(args.policy)) if args.policy else RiskPolicy()
+        from .profiles import load_profile, load_profile_file
+        profile = load_profile(args.profile) if args.profile else load_profile_file(args.profile_file) if args.profile_file else None
+        policy = profile.policy if profile else RiskPolicy(**read_json(args.policy)) if args.policy else RiskPolicy()
+        configuration_info = {"profile": profile.identity if profile else None, "policy": policy.to_dict()}
         now = int(time.time())
         if args.command == "demo":
             from .scenarios import demo
-            result = demo()
+            result = demo(profile=profile, policy=policy if not profile else None)
         elif args.command == "radar":
             from .radar import screen
             result = screen(read_json(args.proposals), policy, now)
@@ -67,7 +73,7 @@ def main(argv=None):
         else:
             if not args.state:
                 raise TradingError("STATE_PATH_REQUIRED")
-            with PaperTrader(args.state, policy) as trader:
+            with PaperTrader(args.state, policy if not profile else None, profile=profile) as trader:
                 if args.command == "open":
                     result = trader.open(args.bot_id, build_plan(read_json(args.plan)),
                                          Market.from_dict(read_json(args.market)), now)
@@ -78,6 +84,7 @@ def main(argv=None):
                     result = trader.status()
                 else:
                     result = trader.status()
+        result["configuration"] = configuration_info
         print(json.dumps(result, sort_keys=True, indent=2))
         return 0
     except TradingError as error:
