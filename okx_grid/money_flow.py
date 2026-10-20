@@ -187,6 +187,8 @@ class MoneyFlowScanner:
             flow=taker_flow(pages,instrument,metadata['quote'],fx,start_ms=start-300000,end_ms=start)
             report={'instrument':instrument,'base':metadata['base'],'quote':metadata['quote'],'source_origin':TR_ORIGIN,
                     'as_of_ms':now,'ticker_ts_ms':at,'flow_window_end_ms':start,
+                    'last_price_native':metric(positive(ticker['last'])),
+                    'last_price_usdt_estimate':metric(quote_to_usdt(ticker['last'],metadata['quote'],fx,now)),
                     'volume_24h_native_quote':metric(number(ticker['volCcy24h'])),
                     'volume_24h_usdt':metric(quote_to_usdt(ticker['volCcy24h'],metadata['quote'],fx,now)),
                     'fx':fx if metadata['quote']=='TRY' else {'method':'USDT_IDENTITY','rate':'1'},

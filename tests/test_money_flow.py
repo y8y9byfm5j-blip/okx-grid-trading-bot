@@ -368,6 +368,8 @@ class FlowCommands(unittest.TestCase):
         result=self.handle(self.update('/analiz TEST'))
         self.assertTrue(result['ok'])
         self.assertIn('HESAPLANMADI',result['message'])
+        self.assertIn('Fiyat 100 USDT',result['message'])
+        self.assertIn('Book ts',result['message'])
         self.assertIn('TEST (TEST-USDT)',result['message'])
 
     def test_unauthorized_forwarded_or_old_never_fetch(self):

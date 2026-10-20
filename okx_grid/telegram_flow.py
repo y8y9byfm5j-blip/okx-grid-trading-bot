@@ -20,8 +20,10 @@ def render_flow(scan, *, detailed=False, suppressed=None):
         leader=coin['leader']
         lines.extend([f"{coin['coin']} ({','.join(coin['pairs'])}) | skor {coin['score']} / 100 | "+('ADAY' if coin['eligible'] else 'İZLE/RET'),
                       f"Skor bileşenleri {coin['score_breakdown']} | {','.join(coin['reasons']) or 'filtreler geçti'}",
+                      f"Fiyat {leader['last_price_native']} {leader['quote']} | USDT eşdeğeri {leader['last_price_usdt_estimate']}",
                       f"RVOL {leader['indicators']['rvol_5m']} | 15m {leader['indicators']['return_15m']} / 1H {leader['indicators']['return_1h']}",
-                      f"CVD taker farkı {coin['cvd_quote_usdt']} USDT | buy oranı {leader['flow']['buy_fraction']}",
+                      f"CVD taker farkı {coin['cvd_quote_usdt']} USDT | buy oranı {leader['flow']['buy_fraction']} | buy/sell {leader['flow']['buy_sell_ratio']}",
+                      f"Book ts {leader['book']['cursor']['at_ms']} | seq {leader['book']['cursor']['sequence']} | flow end {leader['flow_window_end_ms']}",
                       f"24h turnover {leader['volume_24h_usdt']} USDT | quote {leader['quote']} | FX {leader['fx']['method']}",
                       f"Spread {leader['book']['spread_bps']} bps | 0,5% bid/ask derinliği "+str(leader['book']['depth']['0.5pct']),
                       f"Hacim payı {coin['volume_share_24h']} / pay değişimi {coin['share_change']}"])
