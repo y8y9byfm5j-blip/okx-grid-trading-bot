@@ -1,11 +1,14 @@
 """Regression tests for offline automatic paper entry; no OKX or Telegram calls."""
+from concurrent.futures import ThreadPoolExecutor
 import json
+import threading
 from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from okx_grid.automation import consider_paper_entry
+from okx_grid.automation import consider_paper_entry, advance_paper_tick
+from okx_grid.telegram_preview import render_paper_notification
 from okx_grid.domain import TradingError
 from okx_grid.paper import PaperTrader
 from okx_grid.profiles import load_profile
@@ -125,6 +128,121 @@ class AutomaticPaperEntry(unittest.TestCase):
                 b = consider_paper_entry(trader, [candidate()], cycle_id="round_1", now=1000)
                 self.assertEqual(b["decision"], "DUPLICATE_CYCLE")
                 self.assertEqual(len(trader.status()["bots"]), 1)
+
+
+class AutonomousPaperLifecycle(unittest.TestCase):
+    def setUp(self):
+        self.trader = PaperTrader(":memory:", profile=load_profile("v5-paper-500"))
+        self.addCleanup(self.trader.close)
+        self.entry = consider_paper_entry(self.trader, [candidate()], cycle_id="trade_1", now=1000)
+        self.bot = self.entry["bot_id"]
+
+    def test_auto_open_generates_paper_only_telegram_preview(self):
+        text = render_paper_notification(self.entry)
+        self.assertIn("PAPER", text)
+        self.assertIn("90 USDT", text)
+        self.assertIn("TP / SL: 103 / 97", text)
+        self.assertIn("OKX hesabına emir gönderilmedi", text)
+
+    def test_price_tick_tracks_virtual_inventory_and_portfolio(self):
+        result = advance_paper_tick(self.trader, self.bot, "down", "98", observed_at=1001, now=1001)
+        self.assertEqual(result["event"], "UPDATED")
+        self.assertEqual(result["position_status"], "OPEN")
+        self.assertGreater(float(result["quantity"]), 0)
+        self.assertIn("Gerçekleşmemiş PnL", render_paper_notification(result))
+        self.assertEqual(result["portfolio"]["initial_equity"], "500")
+
+    def test_exact_replayed_tick_has_no_duplicate_notification(self):
+        advance_paper_tick(self.trader, self.bot, "down", "98", observed_at=1001, now=1001)
+        replay = advance_paper_tick(self.trader, self.bot, "down", "98.0", observed_at=1001, now=1002)
+        self.assertTrue(replay["duplicate"])
+        self.assertEqual(replay["event"], "REPLAY")
+        self.assertIsNone(render_paper_notification(replay))
+
+    def test_take_profit_closes_and_reports_reason(self):
+        advance_paper_tick(self.trader, self.bot, "down", "98", observed_at=1001, now=1001)
+        result = advance_paper_tick(self.trader, self.bot, "up", "103", observed_at=1002, now=1002)
+        self.assertEqual(result["event"], "CLOSED")
+        self.assertEqual(result["close_reason"], "TAKE_PROFIT")
+        self.assertEqual(float(result["quantity"]), 0)
+        self.assertIn("Kapanış nedeni: TAKE_PROFIT", render_paper_notification(result))
+
+    def test_stop_gap_uses_observed_price_not_guaranteed_stop(self):
+        advance_paper_tick(self.trader, self.bot, "down", "98", observed_at=1001, now=1001)
+        result = advance_paper_tick(self.trader, self.bot, "gap", "80", observed_at=1002, now=1002)
+        self.assertEqual(result["close_reason"], "STOP_LOSS")
+        self.assertLess(float(result["realized_pnl"]), 0)
+        self.assertIn("STOP_LOSS", render_paper_notification(result))
+
+    def test_stop_halt_flattens_on_next_supplied_tick(self):
+        advance_paper_tick(self.trader, self.bot, "down", "98", observed_at=1001, now=1001)
+        self.trader.halt()
+        result = advance_paper_tick(self.trader, self.bot, "halt", "97.5", observed_at=1002, now=1002)
+        self.assertEqual(result["close_reason"], "HALTED")
+        self.assertTrue(result["halted"])
+        self.assertIn("HALT DEVREDE", render_paper_notification(result))
+
+    def test_preview_rejects_nonpaper_or_untrusted_symbol(self):
+        forged = dict(self.entry)
+        forged["mode"] = "live"
+        with self.assertRaisesRegex(TradingError, "INVALID_PAPER_NOTIFICATION"):
+            render_paper_notification(forged)
+        forged["mode"] = "paper"
+        forged["instrument"] = "BTC-USDT\n/admin"
+        with self.assertRaises(TradingError):
+            render_paper_notification(forged)
+
+    def test_stale_tick_does_not_mutate_ledger(self):
+        before = self.trader.status()
+        with self.assertRaisesRegex(TradingError, "STALE_TICK"):
+            advance_paper_tick(self.trader, self.bot, "late", "98", observed_at=1001, now=1040)
+        self.assertEqual(before, self.trader.status())
+
+    def test_notification_is_pure_and_network_free(self):
+        with patch("socket.create_connection", side_effect=AssertionError("network forbidden")):
+            self.assertIn("PAPER", render_paper_notification(self.entry))
+
+    def test_non_actionable_decisions_suppress_notifications(self):
+        result = consider_paper_entry(self.trader, [candidate()], cycle_id="trade_1", now=1000)
+        self.assertEqual(result["decision"], "DUPLICATE_CYCLE")
+        self.assertIsNone(render_paper_notification(result))
+
+
+class AtomicAutoEntryAcrossProcesses(unittest.TestCase):
+    def test_two_cycles_same_symbol_only_one_can_open(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "paper.sqlite3"
+            profile = load_profile("v5-paper-500")
+            with PaperTrader(path, profile=profile):
+                pass
+            gate = threading.Barrier(2)
+            def worker(cycle):
+                with PaperTrader(path, profile=profile) as trader:
+                    gate.wait(timeout=5)
+                    return consider_paper_entry(trader, [candidate()], cycle_id=cycle, now=1000)
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                decisions = list(pool.map(worker, ["race_1", "race_2"]))
+            self.assertEqual([d["decision"] for d in decisions].count("OPENED"), 1)
+            self.assertEqual([d["decision"] for d in decisions].count("NO_ELIGIBLE_CANDIDATE"), 1)
+            with PaperTrader(path, profile=profile) as trader:
+                self.assertEqual(trader.status()["portfolio"]["active_bots"], 1)
+
+    def test_manual_api_default_still_allows_multiple_same_symbol(self):
+        with PaperTrader(":memory:", profile=load_profile("v5-paper-500")) as trader:
+            from okx_grid.scenarios import sample_market
+            plan = sample_plan(capital="90")
+            trader.open("one", plan, sample_market(), 1000)
+            trader.open("two", plan, sample_market(), 1000)
+            self.assertEqual(trader.status()["portfolio"]["active_bots"], 2)
+
+    def test_unique_flag_blocks_direct_duplicate_in_transaction(self):
+        with PaperTrader(":memory:", profile=load_profile("v5-paper-500")) as trader:
+            from okx_grid.scenarios import sample_market
+            plan = sample_plan(capital="90")
+            trader.open("one", plan, sample_market(), 1000, unique_instrument=True)
+            with self.assertRaisesRegex(TradingError, "INSTRUMENT_ALREADY_ACTIVE"):
+                trader.open("two", plan, sample_market(), 1000, unique_instrument=True)
+
 
 
 if __name__ == "__main__":
