@@ -24,6 +24,22 @@ PERIODS = {"15m": 900000, "1H": 3600000}
 
 def request_spec(kind, instrument=None, *, bar=None):
     """Return only an allowlisted GET contract. Never sign, send, or accept URLs."""
+    if kind in {"flow_candles", "trades", "history_trades", "flow_books", "flow_ticker"}:
+        from .flow_contracts import BARS, spot_symbol
+        instrument = spot_symbol(instrument)
+        if (kind == "flow_candles") != (bar is not None) or bar is not None and bar not in BARS:
+            raise TradingError("PUBLIC_REQUEST_NOT_ALLOWED")
+        path = {"flow_candles":"candles", "trades":"trades", "history_trades":"history-trades", "flow_books":"books", "flow_ticker":"ticker"}[kind]
+        params = {"instId":instrument}
+        if kind == "flow_candles":
+            params.update(bar=bar, limit="22")
+        elif kind == "flow_books":
+            params["sz"]="400"
+        elif kind == "trades":
+            params["limit"]="500"
+        elif kind == "history_trades":
+            params.update(limit="100", type="1")
+        return {"method":"GET", "origin":TR_ORIGIN, "path":"/api/v5/market/"+path, "params":params}
     if instrument is not None:
         instrument = symbol(instrument)
     if kind not in PUBLIC_PATHS or (kind == "candles") != (bar is not None):

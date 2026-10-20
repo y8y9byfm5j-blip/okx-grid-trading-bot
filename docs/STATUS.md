@@ -1,5 +1,29 @@
 # İnceleme ve teslim durumu — 20 Ekim 2026
 
+## Issue #6 — V6 Smart Money Flow, artımlı teslim 1
+
+- IMPLEMENTED / OFFLINE TESTED: PR #1'in `8618eab` tabanından ayrı
+  `codex/v6-money-flow` dalı; PR hedefi `codex/paper-safety-ci`, main değil.
+  PR #4 transport'u tabanda zaten entegre; eski sürümle üzerine yazılmadı.
+- TR live SPOT discovery, USDT/TRY quote ve kaynaklı/fresh USDT-TRY dönüşümü;
+  diğer quote'lar açıkça kapsam dışı. Aynı coin tek satırda; hacim ve CVD
+  müşteri bakiyesi/net sermaye girişi olarak sunulmaz.
+- 1m/5m/15m/1H tamamlanmış mum, 20 geçmiş complete 5m RVOL, paginated executed
+  taker flow/duplicate/conflict/window, book sıra/reconnect/depth/spread/slippage,
+  BTC şoku ve explainable heuristik filtreleri eklendi.
+- `/paraakisi`, `/radar`, `/analiz COIN[-USDT|-TRY]` tek-owner hook'u; mevcut
+  `/grid` delege edilir. Kalıcı receipt/cooldown/private notice outbox; sender yok.
+- 295 offline test başarılı: önceki 242 korundu, 53 flow regresyonu eklendi.
+  CI/SHA/staging kanıtı yeni V6 PR raporunda. Fee/depth net execution replay'i
+  stratejinin tarihsel kârlılığını kanıtlamaz.
+- REAL API VERIFIED / TELEGRAM VERIFIED: HAYIR. V6 explicit smoke exit 2,
+  PUBLIC_HTTP_UNAVAILABLE. Gerçek V5/SSH erişimi yok; botta doğrulanan komut 0.
+- BLOCKED / FOLLOW-UP: Issue #5 kapıları, gerçek V5 tek owner ve timeout/rollback,
+  actual Telegram ACK/UNKNOWN, WS availability/stream continuity, tüm evrende
+  eşzamanlı fresh top5 ve tarihsel backtest. İlk teslim top5 yalnız güncel batch.
+- Gerçek order/private API, yeni poller, servis aktivasyonu/restart ve main merge
+  yok. Ayrıntılar: `docs/V6_MONEY_FLOW.md`. Issue #6 bütünü kapanmış sayılmaz.
+
 ## Issue #5 P0 — salt okunur canlı veri katmanı
 
 - IMPLEMENTED: SOL PR #4 GET katmanı incelenip aynı geliştirme dalına alındı;
