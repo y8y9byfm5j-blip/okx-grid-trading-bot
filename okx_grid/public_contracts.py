@@ -13,6 +13,8 @@ from .domain import Market, TradingError, canonical, number, positive, precise, 
 TR_ORIGIN = "https://tr.okx.com"
 PUBLIC_PATHS = {
     "instruments": "/api/v5/public/instruments",
+    "tickers": "/api/v5/market/tickers",
+    "time": "/api/v5/public/time",
     "ticker": "/api/v5/market/ticker",
     "books": "/api/v5/market/books",
     "candles": "/api/v5/market/candles",
@@ -20,14 +22,26 @@ PUBLIC_PATHS = {
 PERIODS = {"15m": 900000, "1H": 3600000}
 
 
-def request_spec(kind, instrument, *, bar=None):
+def request_spec(kind, instrument=None, *, bar=None):
     """Return only an allowlisted GET contract. Never sign, send, or accept URLs."""
-    instrument = symbol(instrument)
+    if instrument is not None:
+        instrument = symbol(instrument)
     if kind not in PUBLIC_PATHS or (kind == "candles") != (bar is not None):
         raise TradingError("PUBLIC_REQUEST_NOT_ALLOWED")
     if bar is not None and bar not in PERIODS:
         raise TradingError("UNSUPPORTED_BAR")
-    params = {"instId": instrument}
+    if kind == "time":
+        if instrument is not None:
+            raise TradingError("PUBLIC_REQUEST_NOT_ALLOWED")
+        params = {}
+    elif kind == "tickers":
+        if instrument is not None:
+            raise TradingError("PUBLIC_REQUEST_NOT_ALLOWED")
+        params = {"instType": "SPOT"}
+    else:
+        if instrument is None and kind != "instruments":
+            raise TradingError("PUBLIC_REQUEST_NOT_ALLOWED")
+        params = {"instId": instrument} if instrument is not None else {}
     if kind == "instruments":
         params["instType"] = "SPOT"
     elif kind == "books":
@@ -116,7 +130,7 @@ class MarketCapture:
 
 
 @precise
-def normalize_market(instrument, instruments_reply, ticker_reply, books_reply, *, source_origin, now_ms, policy, previous=None):
+def normalize_market(instrument, instruments_reply, ticker_reply, books_reply, *, source_origin, now_ms, policy, previous=None, enforce_policy=True):
     if source_origin != TR_ORIGIN:
         raise TradingError("UNVERIFIED_TR_ORIGIN")
     instrument, now_ms = symbol(instrument), milliseconds(now_ms)
@@ -151,7 +165,10 @@ def normalize_market(instrument, instruments_reply, ticker_reply, books_reply, *
                                    "bid": ticker["bidPx"], "ask": ticker["askPx"],
                                    "quote_volume_24h": ticker["volCcy24h"],
                                    "observed_at": min(ticker_at, book_at) // 1000, "bids": bids, "asks": asks})
-        policy.check_market(market, now_ms // 1000, Decimal(0))
+        if type(enforce_policy) is not bool:
+            raise TradingError("INVALID_POLICY_FLAG")
+        if enforce_policy:
+            policy.check_market(market, now_ms // 1000, Decimal(0))
         sequence = book["seqId"]
         if type(sequence) is not int or sequence < 0:
             raise TradingError("INVALID_BOOK_SEQUENCE")

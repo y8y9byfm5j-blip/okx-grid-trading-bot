@@ -1,5 +1,25 @@
 # İnceleme ve teslim durumu — 20 Ekim 2026
 
+## Issue #5 P0 — salt okunur canlı veri katmanı
+
+- IMPLEMENTED: SOL PR #4 GET katmanı incelenip aynı geliştirme dalına alındı;
+  server time/tickers/catalogue, TLS/final-origin, shared pacing, bounded retry,
+  capture normalizasyonu, 400/side REST book ölçümleri ve command hook eklendi.
+- OFFLINE TESTED: 242 test; 400+400 sentetik defter, timestamp/seq/volume/15m/1H,
+  BTC risk-off, HTTP→normalizasyon→ACL komut hattı, retry/TLS/proxy/redirect,
+  restart/replay/UNKNOWN ve hata çıktıları. Son CI/staging SHA/bağlantısı PR'da.
+- `/analiz SYMBOL-USDT`, `/radar`, `/grid`, `/durum` referans hook'u hazırdır.
+  Tek mevcut V5 consumer'a bağlanacak adaydır; ikinci poller/sender yoktur.
+  `/grid` onaylı template ister, sadece sanal öneri verir; rezerv/emir vermez.
+- REAL API VERIFIED: HAYIR. Bu ortamdan explicit BTC smoke exit 2 ve
+  PUBLIC_HTTP_UNAVAILABLE verdi. Gerçek fiyat/hacim/derinlik/trend ölçümü yok.
+- TELEGRAM VERIFIED: HAYIR. Gerçek V5 kaynakları, VPS/SSH ve Telegram oturumu
+  erişilebilir değil. Gerçek botta doğrulanan komut sayısı 0; aktivasyon yok.
+- BLOCKED: izinli ortamda başarılı TR smoke, özgün V5 sözleşmesi, tek consumer,
+  gerçek Telegram e2e ve V5 rollout/rollback. `live_enabled=false` korunur.
+- WebSocket streaming, private/account/order API, yeni servis ve main merge yok.
+  Ayrıntılı sınırlar ve smoke kullanımı: `docs/LIVE_MARKET_DATA.md`.
+
 ## Son ek kontrol — otomatik paper ve Telegram referans sınırı
 
 - IMPLEMENTED / TESTED: SOL PR #3 girişi incelenip aynı dala alındı. Aynı parite

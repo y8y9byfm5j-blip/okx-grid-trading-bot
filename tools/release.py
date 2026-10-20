@@ -23,7 +23,7 @@ MANIFEST = "RELEASE_MANIFEST.json"
 MAX_ARCHIVE_BYTES = 10 * 1024 * 1024
 REQUIRED = {"okx_grid/__init__.py", "okx_grid/__main__.py", "okx_grid/domain.py", "okx_grid/paper.py",
             "okx_grid/radar.py", "okx_grid/automation.py", "okx_grid/control.py", "okx_grid/cycle.py", "okx_grid/telegram_control.py", "tools/run_tests.py", "tests/__init__.py", "okx_grid/profiles.py",
-            "okx_grid/config/v5-paper-500.toml", "okx_grid/public_contracts.py", "V5_COMPATIBILITY.md"}
+            "okx_grid/config/v5-paper-500.toml", "okx_grid/public_contracts.py", "okx_grid/public_http.py", "okx_grid/market_data.py", "okx_grid/telegram_market.py", "tools/public_smoke.py", "V5_COMPATIBILITY.md"}
 
 
 def git(*args, root=ROOT):
