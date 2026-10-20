@@ -64,10 +64,14 @@ class ReadOnlyTRClient:
         self._sleep(float(delay) + jitter)
         return True
 
-    def fetch(self, kind, instrument=None, *, bar=None):
+    def fetch(self, kind, instrument=None, *, bar=None, after=None):
         spec = request_spec(kind, instrument, bar=bar)
         if spec["method"] != "GET" or spec["origin"] != TR_ORIGIN:
             raise TradingError("PUBLIC_REQUEST_NOT_ALLOWED")
+        if after is not None:
+            if kind != "history_trades" or not isinstance(after, str) or not after.isascii() or not after.isdigit() or len(after)>40:
+                raise TradingError("INVALID_PUBLIC_PAGINATION")
+            spec["params"]["after"] = after
         query = urlencode(spec["params"])
         url = TR_ORIGIN + spec["path"] + ("?" + query if query else "")
         for attempt in range(4):

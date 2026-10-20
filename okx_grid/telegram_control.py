@@ -24,7 +24,7 @@ def handle_update(trader, update, *, allowed_chat, allowed_user, now):
             or any(k in message for k in ("forward_origin", "forward_from", "sender_chat", "via_bot", "edit_date"))):
         raise TradingError("TELEGRAM_UNAUTHORIZED")
     text = message.get("text")
-    if not isinstance(text, str) or len(text) > 100 or not re.fullmatch(r"/(?:durum|radar|grid|paper(?: pause| halt)?|analiz [A-Z0-9]{2,20}-USDT)", text):
+    if not isinstance(text, str) or len(text) > 100 or not re.fullmatch(r"/(?:durum|radar|paraakisi|grid|paper(?: pause| halt)?|analiz [A-Z0-9]{1,24}(?:-(?:USDT|TRY))?)", text):
         raise TradingError("TELEGRAM_COMMAND_REJECTED")
     at = timestamp(message.get("date"))
     with trader._transaction():
