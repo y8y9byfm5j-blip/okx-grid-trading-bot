@@ -18,8 +18,10 @@ Fee/minimum notional profil/plan ayarıdır; private fee endpoint'i çağrılmaz
 
 Bu dokümandan sonraki kurallar referans çekirdeğin yerel kabul politikasıdır.
 `okx_grid/public_contracts.py` yalnız supplied response normalizasyonu ve GET
-istek tanımı üretir. HTTP/WebSocket transport'u, API anahtarı, imza, arka plan
-polling'i veya private/order yolu yoktur. `source_origin` alanı zorunlu metadata
+istek tanımı üretir. Bu dalın ayrı `okx_grid/public_http.py` modülü, yalnızca
+açıkça çağrıldığında sabit OKX TR origin ve allowlist GET için HTTP isteği
+yapabilir. API anahtarı, imza, WebSocket, arka plan polling'i veya private/order
+yolu yoktur. `source_origin` alanı zorunlu metadata
 olsa da tek başına gerçek origin kanıtı değildir; gelecekteki transport isteği ve
 yanıtını TLS/origin doğrulamasıyla bağlamalı, redirect'i reddetmelidir.
 
@@ -52,7 +54,8 @@ ve sentetik TR yanıtı, bir paritenin bugün TR'de mevcut olduğu kanıtı değ
 Global OKX verisi TR verisi yerine kullanılmadı. Mevcut `radar.py` hâlâ JSON
 önerisi filtresidir; bu düzeltme onu canlı radar yapmaz.
 
-Canlı transport ve V5 adaptörü, V5 kaynak sözleşmesi doğrulandıktan ve yetkili
-ağ erişimi sağlandıktan sonra ayrı kapıdan geçmelidir. Gerçek response kayıtları
+Salt okunur HTTP kodu mock yanıtlarla doğrulanmıştır; gerçek OKX TR bağlantısında
+başarılı smoke test veya üretim scheduler entegrasyonu yapılmamıştır. V5 adaptörü,
+V5 kaynak sözleşmesi ve yetkili ağ erişimi sağlandıktan sonra ayrı kapıdan geçmelidir. Gerçek response kayıtları
 GitHub'a taşınmaz; deterministik sentetik fixture'larla sözleşme test edilir.
 Duvarlardan kesin fiyat veya gerçekleşebilir getiri tahmini üretilmez.
