@@ -46,3 +46,9 @@ Referans: [V5 uyumluluk matrisi](../V5_COMPATIBILITY.md), [canlı işlem hazırl
 - Yaşam döngüsü testleri stok/kâr-zarar, TP/SL gap, restart, tekrar tick, stale, muhasebe ve eşzamanlı iki farklı cycle ID için tek sembol kısıtlamasını kapsar.
 
 Bu dal **hala bir otomatik çalışan servis değildir**: ticaret sinyalleri, trend ve kitap verileri dışarıdan sağlanır; market feed, scheduler, Telegram send/receive veya gerçek emir aktarımı henüz bağlanmamıştır. İşlem/Telegram çiftliği oluşturulmaz; VPS kaynak koduyla gerçek uyumluluk görülmeden birleştirme yapılmaz.
+
+## Yeni: salt okunur OKX TR HTTP transport'u
+
+`ReadOnlyTRClient`, resmi `https://tr.okx.com` kökü üzerinde **yalnızca belgeli public GET** uç noktalarına istek göndermek için ayrı bir modüldür. Kişisel API anahtarı, passphrase, POST/order/cancel, Telegram çağrısı, zamanlayıcı veya otomatik canlı işleme dair kod içermez. Sabit host, HTTPS sertifika doğrulaması, redirect/proxy reddi, bounded response ve timeout, bozuk/nonzero/boş yanıtların fail-closed değerlendirmesi mock testlerle doğrulanır.
+
+**Bu bağlantı henüz gerçek TR servisine canlı smoke test yapılarak doğrulanmadı.** Modül yalnız açık `fetch(...)` çağrısı üzerine GET yapar; bu dalda kendiliğinden çalışan servis veya bütünleşmiş radar pipeline'ı yoktur. Rate limit kontrolü, endpoint pacing, connection health, gerçek TR parite doğrulaması ve V5 adapter'i yapılmadan üretim radarına bağlanamaz.
