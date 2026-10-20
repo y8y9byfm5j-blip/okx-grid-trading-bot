@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def main():
     required = ["tools/check_repo_safety.py", "tools/run_tests.py", "tests/__init__.py",
                 "okx_grid/domain.py", "okx_grid/paper.py", "okx_grid/radar.py", "okx_grid/profiles.py",
-                "okx_grid/config/v5-paper-500.toml", "okx_grid/public_contracts.py", "okx_grid/automation.py", "okx_grid/control.py", "okx_grid/cycle.py", "okx_grid/telegram_control.py", "V5_COMPATIBILITY.md"]
+                "okx_grid/config/v5-paper-500.toml", "okx_grid/public_contracts.py", "okx_grid/public_http.py", "okx_grid/automation.py", "okx_grid/control.py", "okx_grid/cycle.py", "okx_grid/telegram_control.py", "V5_COMPATIBILITY.md"]
     if any(not (ROOT / p).is_file() for p in required):
         print("Required validation or application file missing.", file=sys.stderr)
         return 1
