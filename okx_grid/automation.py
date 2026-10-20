@@ -67,12 +67,15 @@ def consider_paper_entry(trader, proposals, *, cycle_id, now):
             raise TradingError("AUTO_PLAN_CHANGED")
         market = Market.from_dict(original["market"])
         try:
-            result = trader.open(bot_id, plan, market, now)
+            result = trader.open(bot_id, plan, market, now, unique_instrument=True)
         except TradingError as error:
             if error.code == "DUPLICATE_BOT":
                 # Race: never try a second order or a different candidate.
                 return {"mode": "paper", "decision": "DUPLICATE_CYCLE", "bot_id": bot_id,
                         "portfolio": trader.status()["portfolio"]}
+            if error.code == "INSTRUMENT_ALREADY_ACTIVE":
+                return {"mode": "paper", "decision": "NO_ELIGIBLE_CANDIDATE",
+                        "reason": error.code, "portfolio": trader.status()["portfolio"]}
             if error.code in {"MAX_BOTS", "TOTAL_RISK_LIMIT", "BOT_RISK_LIMIT",
                               "ALLOCATION_LIMIT", "PAPER_HALTED"}:
                 return {"mode": "paper", "decision": "BLOCKED", "reason": error.code,
@@ -85,3 +88,26 @@ def consider_paper_entry(trader, proposals, *, cycle_id, now):
     return {"mode": "paper", "decision": "NO_ELIGIBLE_CANDIDATE",
             "rejections": candidates["rejected"],
             "portfolio": snapshot["portfolio"]}
+
+
+def advance_paper_tick(trader, bot_id, tick_id, price, *, observed_at, now):
+    """Advance one existing PAPER position with a supplied, validated tick.
+
+    The persisted trader records fills, fees, TP/SL and halted state atomically.
+    This returns a Telegram-ready *data object*, not a sent message.
+    """
+    paper_only()
+    _paper_500_only(trader)
+    identifier(bot_id)
+    identifier(tick_id)
+    outcome = trader.tick(bot_id, tick_id, price, observed_at, now)
+    bot = outcome["bots"][0]
+    return {"mode": "paper", "event": "REPLAY" if outcome["duplicate"] else
+            "CLOSED" if bot["status"] == "CLOSED" else "UPDATED",
+            "duplicate": outcome["duplicate"], "bot_id": bot_id,
+            "instrument": bot["instrument"], "position_status": bot["status"],
+            "close_reason": bot["reason"], "last_at": bot["last_at"],
+            "cash": bot["cash"], "quantity": bot["quantity"], "fees": bot["fees"],
+            "realized_pnl": bot["realized_pnl"],
+            "unrealized_pnl": bot["unrealized_pnl"],
+            "portfolio": outcome["portfolio"], "halted": outcome["halted"]}
