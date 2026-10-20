@@ -36,6 +36,7 @@ class PaperTrader:
             raise TradingError("AMBIGUOUS_PAPER_CONFIGURATION")
         self.policy = profile.policy if profile else policy or RiskPolicy()
         self.config_identity = profile.identity if profile else None
+        self._savepoint_counter = 0
         self._db = None
         try:
             if str(path) != ":memory:":
@@ -107,13 +108,20 @@ class PaperTrader:
     def _transaction(self):
         with localcontext() as ctx:
             ctx.prec = 120
+            nested = self._db.in_transaction
+            self._savepoint_counter += 1
+            savepoint = "paper_nested_" + str(self._savepoint_counter)
             try:
-                self._db.execute("BEGIN IMMEDIATE")
+                self._db.execute("SAVEPOINT " + savepoint if nested else "BEGIN IMMEDIATE")
                 yield
-                self._db.execute("COMMIT")
+                self._db.execute("RELEASE " + savepoint if nested else "COMMIT")
             except Exception as error:
                 if self._db.in_transaction:
-                    self._db.execute("ROLLBACK")
+                    if nested:
+                        self._db.execute("ROLLBACK TO " + savepoint)
+                        self._db.execute("RELEASE " + savepoint)
+                    else:
+                        self._db.execute("ROLLBACK")
                 if isinstance(error, sqlite3.Error):
                     raise TradingError("STORAGE_ERROR") from None
                 if isinstance(error, (KeyError, TypeError, IndexError, AttributeError, json.JSONDecodeError, InvalidOperation)):
@@ -241,6 +249,8 @@ class PaperTrader:
             self._audit_all()
             if self._meta("halted"):
                 raise TradingError("PAPER_HALTED")
+            if self._meta("paused"):
+                raise TradingError("PAPER_PAUSED")
             plan.check(self.policy, market, now)
             states = self._states()
             if any(key == bot_id for key, _ in states):
@@ -330,7 +340,7 @@ class PaperTrader:
                     elif held and reason:
                         self._fill(bot_id, state, plan, slot, "sell", price * (1 - plan.slippage_rate),
                                    event_id + ":" + str(slot), observed_at)
-                    elif not reason and not held and last >= buy >= price and price < last:
+                    elif not reason and not self._meta("paused") and not held and last >= buy >= price and price < last:
                         self._fill(bot_id, state, plan, slot, "buy", buy, event_id + ":" + str(slot), observed_at)
                 if reason:
                     state.update(status="CLOSED", reason=reason)
@@ -352,6 +362,13 @@ class PaperTrader:
             self._audit_all()
             self._set_meta("halted", True)
 
+    def pause(self):
+        """Persistently block new entries/buys; existing sell/TP/SL handling continues."""
+        paper_only()
+        with self._transaction():
+            self._audit_all()
+            self._set_meta("paused", True)
+
     def status(self, bot_id=None):
         with self._transaction():
             self._audit_all()
@@ -370,5 +387,5 @@ class PaperTrader:
                                "unrealized_pnl": str(net_inventory - cost), "equity": str(equity),
                                "total_pnl": str(equity - plan.capital), "last_at": state["last_at"],
                                "planned_stop_loss": str(plan.planned_loss), "plan_digest": plan.digest})
-            return {"mode": "paper", "halted": self._meta("halted"), "bots": result,
+            return {"mode": "paper", "halted": self._meta("halted"), "paused": bool(self._meta("paused")), "bots": result,
                     "profile": self.config_identity, "portfolio": self._portfolio()}

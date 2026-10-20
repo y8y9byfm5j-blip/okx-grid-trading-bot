@@ -1,6 +1,29 @@
 # İnceleme ve teslim durumu — 20 Ekim 2026
 
-## SOL P0/P1 düzeltmesi — güncel kabul durumu
+## Son ek kontrol — otomatik paper ve Telegram referans sınırı
+
+- IMPLEMENTED / TESTED: SOL PR #3 girişi incelenip aynı dala alındı. Aynı parite
+  eşzamanlı giriş, bütün kararların kalıcı fingerprint'i, nested transaction,
+  rollback ve restart korumaları eklendi. 500 USDT profil limiti gevşetilemez.
+- IMPLEMENTED / TESTED: çağrılabilir tek çevrim, sağlanan fiyatlarla fill/TP/SL,
+  sembol allowlist'i, kalıcı pause, private bildirim outbox'ı ve UNKNOWN teslim
+  durumunda yeni alımları durdurma. Poller veya gerçek gönderici yoktur.
+- IMPLEMENTED / TESTED: offline Telegram referansında kullanıcı+özel chat ACL,
+  stale/forward/edited/bot reddi, komut allowlist'i, kalıcı update replay/conflict,
+  cursor ve rate-limit. V5_NOT_CONNECTED / NOT_SENT açıkça döndürülür.
+- Yerel doğrulama: 199 test, kaynak güvenlik taraması ve offline demo başarılı.
+  Son commit için CI/staging sonucu PR #1 raporuna eklenir.
+- DESIGNED_ONLY: gerçek V5 adapter/poller/sender, günlük UTC zarar limiti,
+  gelecekteki gerçek exchange intent/outbox/UNKNOWN/partial-fill/cancel
+  reconciliation yaşam döngüsü. Mevcut 10 USDT fuse yalnız ömür boyu net
+  gerçekleşen zarardır; günlük limit diye sunulmaz.
+- BLOCKED: V5 kaynakları ve canlı servis incelemesi için VPS/SSH erişimi yok;
+  TR API domain'i ağ izin listesinde yok. Gerçek V5 komut sözleşmeleri ve
+  canlı public smoke doğrulanmadı. Proje operasyonel tamamlandı sayılmaz.
+- MAIN/PR merge, VPS aktivasyonu, gerçek emir ve gerçek Telegram gönderimi yok.
+  `docs/LIVE_TRADING_READINESS.md` SOL sürümü korundu; PR #3 main'e birleştirilmedi.
+
+## SOL P0/P1 düzeltmesi — önceki kabul durumu
 
 Talimat: [SOL denetim yorumu](https://github.com/y8y9byfm5j-blip/okx-grid-trading-bot/pull/1#issuecomment-6283833803).
 Aynı `codex/paper-safety-ci` dalında devam edildi. PR DRAFT kalır; merge,
