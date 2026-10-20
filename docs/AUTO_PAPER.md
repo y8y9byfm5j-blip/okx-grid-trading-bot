@@ -36,3 +36,13 @@ with PaperTrader(":memory:", profile=load_profile("v5-paper-500")) as trader:
 5. Gerçek emirler için ayrı branch, minimum yetki, emir eşleştirme ve ayrıca kullanıcı go-live onayı.
 
 Referans: [V5 uyumluluk matrisi](../V5_COMPATIBILITY.md), [canlı işlem hazırlık kapıları](LIVE_TRADING_READINESS.md).
+
+## Güncelleme: fiyat tick yaşam döngüsü, yarış güvenliği ve bildirim önizlemesi
+
+- `advance_paper_tick` mevcut sanal botta sağlanan fiyat/tick ile **gerçek olmayan** alış/satış dolumlarını, TP/SL/kalıcı HALT ve muhasebe durumunu `PaperTrader.tick` üzerinden günceller.
+- Tek sembolde iki farklı karar döngüsünün aynı anda açılış yapması, `PaperTrader.open(unique_instrument=True)` kontrolüyle **SQLite BEGIN IMMEDIATE işleminin içinde** reddedilir; eski manuel `open` davranışı değiştirilmez.
+- `render_paper_notification` sanal giriş, güncelleme ve kapanış durumlarını Türkçe Telegram **mesaj önizlemesine** dönüştürür. Tekrar oynatmalarda bildirim üretmez. **Göndermez**, token/Telegram API kullanmaz.
+- Tüm uyarılarda `PAPER` ve gerçek emir gönderilmediği belirtilir. Telegram gerçek komut yetkilendirmesi, chat allowlist, botun tek polling oturumu ve teslim edilmiş bildirimlerin kalıcı idempotency defteri **henüz yoktur**.
+- Yaşam döngüsü testleri stok/kâr-zarar, TP/SL gap, restart, tekrar tick, stale, muhasebe ve eşzamanlı iki farklı cycle ID için tek sembol kısıtlamasını kapsar.
+
+Bu dal **hala bir otomatik çalışan servis değildir**: ticaret sinyalleri, trend ve kitap verileri dışarıdan sağlanır; market feed, scheduler, Telegram send/receive veya gerçek emir aktarımı henüz bağlanmamıştır. İşlem/Telegram çiftliği oluşturulmaz; VPS kaynak koduyla gerçek uyumluluk görülmeden birleştirme yapılmaz.
