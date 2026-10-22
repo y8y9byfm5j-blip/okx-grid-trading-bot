@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        probe: ['v7-btc', 'v7-sol', 'v6-btc', 'v6-btc-usdt', 'v6-sol-usdt']
+        probe: ['v7-btc', 'v7-sol', 'v6-btc', 'v6-btc-usdt', 'v6-sol-usdt', 'v7-paper-safety']
     env:
       TRADING_MODE: paper
       LIVE_TRADING: 'false'
@@ -38,7 +38,7 @@ jobs:
         env:
           PROBE_KIND: ${{ matrix.probe }}
         run: |
-          # No VPS, accounts, Telegram, state files, secrets or deploy steps.
+          # No VPS/accounts/Telegram/secrets/deploy. Paper safety uses only a temporary ledger.
           set +e
           case "$PROBE_KIND" in
             v7-btc) python tools/v7_smoke.py --allow-public-network --symbol BTC-USDT --include-plan > "$RUNNER_TEMP/tr-public-result.txt" ;;
@@ -46,6 +46,7 @@ jobs:
             v6-btc) python tools/flow_smoke.py --allow-public-network --target BTC --limit 1 > "$RUNNER_TEMP/tr-public-result.txt" ;;
             v6-btc-usdt) python tools/flow_smoke.py --allow-public-network --target BTC-USDT --limit 1 > "$RUNNER_TEMP/tr-public-result.txt" ;;
             v6-sol-usdt) python tools/flow_smoke.py --allow-public-network --target SOL-USDT --limit 1 > "$RUNNER_TEMP/tr-public-result.txt" ;;
+            v7-paper-safety) python tools/v7_paper_smoke.py --allow-public-network > "$RUNNER_TEMP/tr-public-result.txt" ;;
             *) exit 3 ;;
           esac
           probe_exit=$?

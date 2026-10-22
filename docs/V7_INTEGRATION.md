@@ -96,6 +96,19 @@ Sözleşme: https://tr.okx.com/docs-v5/en/
 (history max100, recent max500; confirm=0 tamamlanmamış, confirm=1 tamamlanmış).
 
 22 Ekim 2026. Bu kaynaklar mevcut V5 için çağrılabilir entegrasyon sınırıdır.
+Son paper güvenlik kabulü: `tools/v7_paper_smoke.py --allow-public-network`.
+Bu yalnız kendi oluşturduğu geçici defteri kullanır; mevcut yol kabul etmez.
+Gerçek default TR capture ile V7Core start/decision/cycle çalıştırılır; bildirim
+sağlığı bilerek false tutulur. Girişin engellenmesi, aynı karar/çevrimin tekrar
+işlenmemesi, 600 USDT nakit/0 rezerv muhasebesi, kapanış-açılış sonrası aynı durum
+ve kalıcı halt denetlenir. Telegram ACK taklit edilmez, sender yoktur. Başarılı
+sonuç bile iki pozisyonun gerçek veriyle açıldığı veya üretimin hazır olduğu
+anlamına gelmez; `two_position_live_data_acceptance=NOT_TESTED` açıkça döner.
+365 offline regresyon geçti; fixture transport gerçek paper kabulünü geçemez.
+Ek düzeltme: veri alınmayan/hatalı gerçek-mod çevrimleri ve bütün flow pair'leri
+reddedilen momentum taraması DATA_UNVERIFIED kalır; transport seçimi tek başına
+başarı etiketi değildir. Son gerçek koşu/CI kanıtı PR açıklamasında raporlanır.
+
 Yeni Telegram botu, poller, scheduler, gönderen veya üretim veritabanı kurulmaz.
 **Üretim V5 entegrasyonu BLOKE; gerçek emirler KAPALI.**
 

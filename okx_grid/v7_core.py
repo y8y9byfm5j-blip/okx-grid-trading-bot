@@ -112,7 +112,8 @@ class V7Core:
         scan["portfolio"] = state["portfolio"]
         scan["execution_action"] = "NO TRADE"
         scan["data_status"] = ("VERIFIED_TR_PUBLIC" if self.market.real_transport and
-                               self.flow.client is self.market.client else "DATA_UNVERIFIED")
+                               self.flow.client is self.market.client and
+                               any('error' not in report for report in scan['pairs'].values()) else "DATA_UNVERIFIED")
         with self.trader._transaction():
             self.trader._set_meta("v7_flow_offset", scan["next_offset"] or 0)
         return scan
@@ -223,7 +224,8 @@ class V7Core:
                     rejections.append({"instrument": name, "reasons": [error.code]})
             result = {"mode": "paper", "duplicate": False, "opened": openings, "updates": updates,
                       "rejections": rejections, "data_errors": errors, "state": self.trader.status(),
-                      "data_mode": "SYNTHETIC_TEST" if self.trader.synthetic else "VERIFIED_TR_PUBLIC",
+                      "data_mode": ("SYNTHETIC_TEST" if self.trader.synthetic else
+                                    "VERIFIED_TR_PUBLIC" if reports and not errors else "DATA_UNVERIFIED"),
                       "live_enabled": False}
             record(self.trader, "v7_cycle:" + cycle_id, "v7_cycle", now, {"inputs": inputs, "result": result})
             self.trader._set_meta("v7_cycle_last_at", now)

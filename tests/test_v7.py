@@ -8,7 +8,7 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 from okx_grid.commands import REGISTRY, pair_name, parse_command
 from okx_grid.control import mark_notice, notices, queue_notice
@@ -441,6 +441,26 @@ class PaperAcceptanceTests(unittest.TestCase):
 
 
 class PersistenceAndConcurrencyTests(unittest.TestCase):
+    def test_empty_real_mode_cycle_does_not_claim_verified_data(self):
+        api, trader, core = make_system(synthetic=False)
+        with trader:
+            cycle = core.run_cycle(cycle_id='not_started', now=NOW//1000)
+            self.assertEqual(cycle['data_mode'], 'DATA_UNVERIFIED')
+            self.assertEqual(cycle['opened'], [])
+            self.assertTrue(cycle['state']['paused'])
+            self.assertEqual(api.calls, [])
+
+    def test_momentum_without_valid_pairs_does_not_claim_transport_as_data(self):
+        api, trader, core = make_system()
+        with trader:
+            for pairs in ({}, {'SOL-USDT': {'error': 'STALE_OR_FUTURE_FLOW_DATA'}}):
+                scan={'pairs': pairs, 'coins': [], 'next_offset': None}
+                # This unit test isolates the reporting predicate; no source
+                # capture or actual market verification is performed.
+                with patch.object(V7MarketData, 'real_transport', new_callable=PropertyMock, return_value=True), \
+                        patch.object(core.flow, 'scan_batch', return_value=scan):
+                    self.assertEqual(core.momentum()['data_status'], 'DATA_UNVERIFIED')
+
     def test_new_profile_does_not_adopt_v5_or_reset_it(self):
         with tempfile.TemporaryDirectory() as d:
             old = Path(d) / "v5.sqlite3"
@@ -588,6 +608,23 @@ class UnifiedHookTests(unittest.TestCase):
             self.assertEqual(main(["--allow-public-network"]), 2)
         self.assertIn('"data_status": "DATA_UNVERIFIED"', output.getvalue())
         self.assertNotIn("price", output.getvalue())
+
+    def test_paper_smoke_requires_opt_in_and_rejects_fixture_source(self):
+        from tools.v7_paper_smoke import main
+        with patch('sys.stderr', io.StringIO()), self.assertRaises(SystemExit):
+            main([])
+        output = io.StringIO()
+        with patch('tools.v7_paper_smoke.V7MarketData', return_value=self.core.market), patch('sys.stdout', output):
+            self.assertEqual(main(['--allow-public-network']), 2)
+        self.assertIn('"error": "DATA_UNVERIFIED"', output.getvalue())
+        self.assertNotIn('snapshot_id', output.getvalue())
+        self.assertNotIn('sqlite3', output.getvalue())
+
+    def test_paper_smoke_live_env_is_rejected_before_ledger_or_http(self):
+        from tools.v7_paper_smoke import main
+        with patch.dict('os.environ', {'LIVE_TRADING': 'true'}), patch('tools.v7_paper_smoke.tempfile.TemporaryDirectory', side_effect=AssertionError('no ledger')), patch('sys.stdout', io.StringIO()) as output:
+            self.assertEqual(main(['--allow-public-network']), 2)
+        self.assertIn('LIVE_TRADING_DISABLED', output.getvalue())
 
     def test_existing_v6_fee_model_default_is_preserved_and_v7_fee_is_explicit(self):
         from okx_grid.money_flow import MoneyFlowScanner

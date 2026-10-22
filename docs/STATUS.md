@@ -19,7 +19,7 @@
 - V6 gerçek kabul hâlâ başarısız: BTC-USDT beş dakikalık işlem penceresi
   REST sayfa bütçesine sığmadı (`INCOMPLETE_FLOW_TRADE_WINDOW`); BTC-TRY
   ticker/defter uyumu reddedildi. Eksik CVD sinyal/başarı diye gösterilmez.
-- 361 offline regresyon geçti. Enstrüman kataloğunun 1 MB aşması için yalnız
+- 365 offline regresyon geçti. Enstrüman kataloğunun 1 MB aşması için yalnız
   katalog bütçesi sınırlandırılarak ayrıldı; açık parite hedefi korunur;
   tüm pair'leri reddedilen V6 smoke JSON'da da `ok=false` döndürür.
 - `c1b42511514dcee0d706ddb69706ae4ccad6cc12` public koşusunda V6 SOL-USDT
@@ -31,6 +31,12 @@
   history + 500 recent işlem ve 15 saniyelik trade bütçesi uygulanır; toplam
   30 saniye korunur. Mumlar pagination'dan sonra alınır; teyit bekleyen pencere
   bir kez yenilenir. Teyitsiz mum kabul edilmez; dakika sınırı tekrar denetlenir.
+- Veri alınmayan/başarısız gerçek-mod çevrimi ve tüm pair'leri reddedilen
+  momentum çıktısı artık VERIFIED_TR_PUBLIC etiketi üretmez.
+- `tools/v7_paper_smoke.py` gerçek TR capture + ayrı geçici 600 USDT defterinde
+  karar/çevrim replay, bildirim sağlığı yokken giriş engeli, muhasebe, restart
+  ve kalıcı halt kabulünü çalıştırır. Telegram göndermez; pozisyon açmayı bilerek
+  engeller. Canlı veride iki pozisyon açılması veya V5 aktivasyonu kanıtı değildir.
 - TELEGRAM_VERIFIED=false; ACTIVATED=false. Bu çalışmada gerçek bot üzerinde
   doğrulanan komut **0**. V5 kaynakları ve VPS/SSH/remote shell yok;
   servis/scheduler/Python/aktif commit/dispatcher durumu BLOKE.
