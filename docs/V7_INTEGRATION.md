@@ -1,5 +1,19 @@
 # V5 / V6 / V7 — 600 USDT paper entegrasyon adayı
 
+Devam kontrolü (22 Ekim): kullanıcı erişim işlemlerini tamamladığını bildirdi.
+Bu oturumda V5 dizini/SSH config/agent hâlâ yok; DigitalOcean konsolu bu çalışma
+tarayıcısında `Site Unavailable` verdi. Yerel gerçek V7 public smoke yeniden
+`PUBLIC_HTTP_UNAVAILABLE` / exit 2 döndü. GitHub dalı değişmemişti; erişim veya
+özgün kaynak aktarımı doğrulanamadı. Üretime dokunulmadı.
+
+`.github/workflows/tr-public-probe.yml` ayrı GitHub runner'ında anahtarsız,
+GET-only BTC/SOL V7 ve BTC V6 kabul testlerini çalıştırır. Bu, alternatif API
+origin'i/proxy değildir; yalnız aynı TR istemcisinin farklı, izole bir test
+ortamında çalıştırılmasıdır. Sonuç runner konumuyla sınırlıdır ve yerel/VPS
+DATA_UNVERIFIED durumunu değiştirmez. Hiçbir servise bağlanmaz, emir veya paper
+pozisyon açmaz. Sonuçlar çalışma logu/summary üzerinden raporlanır; VPS/Telegram
+kapıları bağımsız olarak açık kalır.
+
 22 Ekim 2026. Bu kaynaklar mevcut V5 için çağrılabilir entegrasyon sınırıdır.
 Yeni Telegram botu, poller, scheduler, gönderen veya üretim veritabanı kurulmaz.
 **Üretim V5 entegrasyonu BLOKE; gerçek emirler KAPALI.**
