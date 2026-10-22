@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        probe: ['v7-btc', 'v7-sol', 'v6-btc']
+        probe: ['v7-btc', 'v7-sol', 'v6-btc', 'v6-btc-usdt']
     env:
       TRADING_MODE: paper
       LIVE_TRADING: 'false'
@@ -44,6 +44,7 @@ jobs:
             v7-btc) python tools/v7_smoke.py --allow-public-network --symbol BTC-USDT > "$RUNNER_TEMP/tr-public-result.txt" ;;
             v7-sol) python tools/v7_smoke.py --allow-public-network --symbol SOL-USDT > "$RUNNER_TEMP/tr-public-result.txt" ;;
             v6-btc) python tools/flow_smoke.py --allow-public-network --target BTC --limit 1 > "$RUNNER_TEMP/tr-public-result.txt" ;;
+            v6-btc-usdt) python tools/flow_smoke.py --allow-public-network --target BTC-USDT --limit 1 > "$RUNNER_TEMP/tr-public-result.txt" ;;
             *) exit 3 ;;
           esac
           probe_exit=$?

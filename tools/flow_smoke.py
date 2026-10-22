@@ -22,13 +22,14 @@ def main(argv=None):
         result=scanner.scan_batch(offset=args.offset,limit=args.limit,target=args.target)
         summary={k:result[k] for k in ('source_origin','as_of_ms','server_ts_ms','scope','discovered_pairs','excluded_quotes',
                                       'batch_pairs','next_offset','universe_hash','warnings')}
-        summary.update(ok=True,live_enabled=False,candidates=[{k:c[k] for k in ('coin','pairs','score','score_breakdown','reasons','as_of_ms')}
+        accepted=any('error' not in r for r in result['pairs'].values())
+        summary.update(ok=accepted,live_enabled=False,candidates=[{k:c[k] for k in ('coin','pairs','score','score_breakdown','reasons','as_of_ms')}
                          for c in result['top5']],pair_status={name:({'error':r['error']} if 'error' in r else
                          {'quote':r['quote'],'volume_24h_usdt':r['volume_24h_usdt'],'fx':r['fx'],'indicators':r['indicators'],
                           'flow':r['flow'],'spread_bps':r['book']['spread_bps'],'depth':r['book']['depth'],
                           'book_ts_ms':r['book']['cursor']['at_ms'],'selection':r['selection']}) for name,r in result['pairs'].items()})
         print(json.dumps(summary,sort_keys=True))
-        return 0 if any('error' not in r for r in result['pairs'].values()) else 2
+        return 0 if accepted else 2
     except TradingError as error:
         diagnostics=getattr(getattr(locals().get('scanner'),'client',None),'last_response',None)
         summary={'ok':False,'live_enabled':False,'error':error.code}

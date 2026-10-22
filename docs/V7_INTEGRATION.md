@@ -30,6 +30,17 @@ consumer'ının enstrüman kataloğu için açık 8 MB bütçesi eklendi. Generi
 varsayılanı ve kitap/ticker/mum sınırları korunur; 5000 satır ve JSON şema kontrolü
 devam eder. Katalog büyümesi global veri kaynağına geçiş gerekçesi değildir.
 
+Üçüncü probe (`22e28bf7f44393f088e29ed6f9ab6fd90caeb87a`, Actions
+`39739256372`): BTC-USDT V7 gerçek default TR transport ile geçti:
+`VERIFIED_TR_PUBLIC`, 400/400, kitap yaşı 62 ms, 15m/1H/4H tamamlanmış mumlar;
+snapshot `3efd39738032892a10b619e89449b29a1690930b1c23ac1ba286d80c9b0cc68f`.
+Bu yalnız o runner'daki o anlık görüntünün kanıtıdır. SOL `INVALID_ORDER_BOOK`,
+V6 bare-BTC taramasının seçtiği BTC-TRY `STALE_OR_FUTURE_FLOW_DATA` ile reddedildi.
+Üç Python sürümünde 350 offline test geçti. Açık parite hedefinin diğer quote'a
+genişlemesi düzeltildi; bare coin hâlâ quote'ları birleştirir. V6 smoke tüm
+pariteler reddedildiğinde artık JSON `ok=false` üretir. SOL teşhisi için top of
+book uyuşmazlığı ayrı hata koduna ayrıldı; tutarlılık koşulu gevşetilmedi.
+
 22 Ekim 2026. Bu kaynaklar mevcut V5 için çağrılabilir entegrasyon sınırıdır.
 Yeni Telegram botu, poller, scheduler, gönderen veya üretim veritabanı kurulmaz.
 **Üretim V5 entegrasyonu BLOKE; gerçek emirler KAPALI.**

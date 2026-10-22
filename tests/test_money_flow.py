@@ -256,6 +256,15 @@ class FlowScannerTests(unittest.TestCase):
         self.assertEqual(coin['cvd_quote_usdt'],'1600')
         self.assertTrue(coin['coverage_complete'])
         self.assertEqual(coin['leader']['volume_24h_usdt'],'20000000')
+
+    def test_explicit_pair_does_not_expand_to_other_quote(self):
+        api=FakeFlowAPI(('BTC-USDT','TEST-USDT','TEST-TRY','USDT-TRY'))
+        result=scanner(api).scan_batch(target='TEST-USDT')
+        self.assertEqual(result['batch_pairs'],['TEST-USDT'])
+        self.assertFalse(any(call[1]=='TEST-TRY' for call in api.calls))
+        # Missing exact quote must never fall back to another pair.
+        with self.assertRaisesRegex(TradingError,'FLOW_SYMBOL_NOT_DISCOVERED'):
+            scanner(api).scan_batch(target='TEST-USDC')
         self.assertNotIn('USDT',[c['coin'] for c in result['coins']])
 
     def test_partial_coin_pair_coverage_cannot_rank(self):
@@ -587,6 +596,17 @@ class FlowEdgeAndIntegrationTests(unittest.TestCase):
 
 
 class FlowSmokeTests(unittest.TestCase):
+    def test_all_rejected_pairs_emit_false_ok_and_nonzero_exit(self):
+        from tools.flow_smoke import main
+        import json
+        api=FakeFlowAPI()
+        api.fail='flow_books'
+        output=io.StringIO()
+        with patch('tools.flow_smoke.MoneyFlowScanner',return_value=scanner(api)),patch('sys.stdout',output):
+            result=main(['--allow-public-network','--target','TEST-USDT'])
+        self.assertEqual(result,2)
+        self.assertFalse(json.loads(output.getvalue())['ok'])
+
     def test_network_flag_required_before_fetch(self):
         from tools.flow_smoke import main
         with patch('sys.stderr',io.StringIO()),patch('socket.create_connection',side_effect=AssertionError('no network')):

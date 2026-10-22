@@ -255,8 +255,9 @@ class MoneyFlowScanner:
         btc_return=btc_bar['close']/btc_bar['open']-1
         names=sorted(pairs)
         if target is not None:
-            base=pairs[target]['base'] if target in pairs else target
-            names=[name for name in names if pairs[name]['base']==base]
+            # A pair is an exact request; only a bare coin aggregates its quotes.
+            names=([target] if target in pairs else
+                   [name for name in names if pairs[name]['base']==target])
             if not names:
                 raise TradingError('FLOW_SYMBOL_NOT_DISCOVERED')
             if offset:

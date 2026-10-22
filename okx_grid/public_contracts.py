@@ -183,6 +183,8 @@ def normalize_market(instrument, instruments_reply, ticker_reply, books_reply, *
                     raise TradingError("INVALID_ORDER_BOOK")
             return [[r[0], r[1]] for r in rows]
         bids, asks = levels("bids"), levels("asks")
+        if positive(bids[0][0]) != positive(ticker["bidPx"]) or positive(asks[0][0]) != positive(ticker["askPx"]):
+            raise TradingError("INCOHERENT_PUBLIC_TOP_OF_BOOK")
         market = Market.from_dict({"instrument": instrument, "price": ticker["last"],
                                    "bid": ticker["bidPx"], "ask": ticker["askPx"],
                                    "quote_volume_24h": ticker["volCcy24h"],
