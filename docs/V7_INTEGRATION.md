@@ -1,10 +1,16 @@
 # V5 / V6 / V7 — 600 USDT paper entegrasyon adayı
 
-Devam kontrolü (22 Ekim): kullanıcı erişim işlemlerini tamamladığını bildirdi.
-Bu oturumda V5 dizini/SSH config/agent hâlâ yok; DigitalOcean konsolu bu çalışma
-tarayıcısında `Site Unavailable` verdi. Yerel gerçek V7 public smoke yeniden
-`PUBLIC_HTTP_UNAVAILABLE` / exit 2 döndü. GitHub dalı değişmemişti; erişim veya
-özgün kaynak aktarımı doğrulanamadı. Üretime dokunulmadı.
+Güncel kaynak kontrolü (22 Ekim): kullanıcı görüntüleri mevcut Telegram
+systemd servisinin active olduğunu, çalışma dizinini, Python 3.12 executable'ını,
+fonksiyon imzalarını ve üç maskeli AST gövdesini doğruladı. Doğrudan VPS/SSH
+erişimi ve dokuz tam kaynak hâlâ yok. Gözlenen owner akışına uygun
+`V5OwnerBridge` staging'de geliştirildi: tam update ACL, durable checkpoint,
+outbox/restart ve gönderim UNKNOWN/ACK sözleşmesi. 15 yeni sentetik test
+eklendi; üretime uygulanmadı. Kesin gözlemler, bilinmeyenler ve kalan
+kapılar: [V5_OWNER_BRIDGE.md](V5_OWNER_BRIDGE.md).
+
+Aşağıdaki probe kayıtları tarihçedir; son exact-head CI ve public koşu
+sonuçları draft PR #10'da güncel SHA ile raporlanır.
 
 `.github/workflows/tr-public-probe.yml` ayrı GitHub runner'ında anahtarsız,
 GET-only BTC/SOL V7 ve BTC V6 kabul testlerini çalıştırır. Bu, alternatif API
@@ -165,9 +171,10 @@ penceresi/ticker uyumsuzluğu nedeniyle hâlâ başarısızdır. Global OKX, rel
 sentetik fiyatla bu başarısızlık örtülmez. Resmî dokümana erişilebilmesi gerçek
 API bağlantısının çalıştığı anlamına gelmez.
 
-`/opt/okx-grid-demo/v5` mevcut değil; SSH yapılandırması, SSH agent veya yetkili
-uzak terminal aracı yok. V5 kaynakları, servis/scheduler, üretim Python sürümü,
-bağımlılıklar, aktif commit, yönlendirici ve durum defterleri **DOĞRULANMADI**.
+Asistanın yerel ortamında `/opt/okx-grid-demo/v5` ve yetkili uzak terminal
+erişimi yok. Kullanıcı ekranı üretimde bu dizini, active Telegram servisini ve
+Python 3.12 executable'ını doğruladı. Tam kaynak, scheduler, bağımlılıklar,
+aktif commit, durum defteri ve gerçek Telegram e2e **DOĞRULANMADI**.
 
 ## 4. Telegram'da gerçekten etkin özellikler
 
@@ -243,7 +250,7 @@ from okx_grid.telegram_v7 import handle_v7_update
 trader = V7PaperTrader(separate_v7_state_path)
 market = V7MarketData(trader.policy)
 core = V7Core(trader, market)
-# Existing owner supplies a normalized private update, ACL and current time.
+# Existing owner supplies the full native private update, ACL and current time.
 result = handle_v7_update(core, update, allowed_chat=chat_id,
                           allowed_user=user_id, now=current_time)
 # result['delivery'] == 'NOT_SENT': existing V5 sender must deliver and record ACK.
@@ -253,8 +260,12 @@ result = handle_v7_update(core, update, allowed_chat=chat_id,
 `notification_healthy` cycle için varsayılan false'tur. Sender'ın ACK/UNKNOWN
 durumu mevcut outbox ile uzlaştırılmalıdır. Bağlantı hatası yeni alışları kalıcı
 pause eder; başarılı yeni GET otomatik resume etmez. Başlangıç explicit ve veri
-kontrollüdür. Özgün V5'in daha geniş Telegram update şeması önce normalize
-edilmelidir; hook key whitelist'i sessizce gevşetilmemiştir.
+kontrollüdür. Özgün V5'in raw update'i mesaj metadata'sı ve güvenlik bayrakları
+korunarak verilir; kimlikler metinden üretilmez veya forwarding bilgileri
+silinmez. Gözlenen erken offset kaydı yerine kullanılacak staging
+checkpoint/delivery sınırı [V5_OWNER_BRIDGE.md](V5_OWNER_BRIDGE.md) içinde
+açıklanır; yukarıdaki doğrudan hook çağrısı tek başına owner checkpoint
+entegrasyonu değildir.
 
 ## 6. Engeller ve gereken kullanıcı işlemleri
 

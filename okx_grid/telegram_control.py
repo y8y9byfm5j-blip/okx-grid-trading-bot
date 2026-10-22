@@ -5,9 +5,8 @@ from .control import pin, receipt, record, snapshot
 from .domain import TradingError, paper_only, timestamp
 
 
-def handle_update(trader, update, *, allowed_chat, allowed_user, now):
-    paper_only()
-    timestamp(now)
+def authorize_update(update, *, allowed_chat, allowed_user):
+    """Shared raw-update identity boundary; never discard security flags."""
     if type(allowed_chat) is not int or type(allowed_user) is not int or allowed_chat <= 0 or allowed_user <= 0:
         raise TradingError("TELEGRAM_ACL_REQUIRED")
     update, digest = snapshot(update)
@@ -23,6 +22,14 @@ def handle_update(trader, update, *, allowed_chat, allowed_user, now):
             or chat.get("type") != "private" or sender.get("is_bot") is not False
             or any(k in message for k in ("forward_origin", "forward_from", "sender_chat", "via_bot", "edit_date"))):
         raise TradingError("TELEGRAM_UNAUTHORIZED")
+    return update, digest
+
+
+def handle_update(trader, update, *, allowed_chat, allowed_user, now):
+    paper_only()
+    timestamp(now)
+    update, digest = authorize_update(update, allowed_chat=allowed_chat, allowed_user=allowed_user)
+    uid, message = update["update_id"], update["message"]
     text = parse_command(message.get("text")).text
     at = timestamp(message.get("date"))
     with trader._transaction():

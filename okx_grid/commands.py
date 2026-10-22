@@ -32,7 +32,12 @@ class Command:
 
 
 def parse_command(text):
-    if not isinstance(text, str) or not 1 <= len(text) <= 100 or not text.isascii():
+    if not isinstance(text, str) or not 1 <= len(text) <= 100:
+        raise TradingError("TELEGRAM_COMMAND_REJECTED")
+    # Turkish keyboards produce dotted/dotless I in GRID/SUI. Map only those
+    # two code points; other Unicode lookalikes remain rejected.
+    text = text.replace("ı", "i").replace("İ", "I")
+    if not text.isascii():
         raise TradingError("TELEGRAM_COMMAND_REJECTED")
     parts = text.strip().split()
     if not parts:

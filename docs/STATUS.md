@@ -2,6 +2,16 @@
 
 ## V7 görev emri — güncel durum
 
+- Son kaynak kanıtı: kullanıcı görüntülerinde mevcut Telegram systemd servisi
+  active, `/opt/okx-grid-demo/v5` çalışma dizini ve `/usr/bin/python3.12`
+  executable'ı görüldü. `docker` komutu yok; container/venv yokluğu bundan
+  çıkarılamaz. İmzalar ve `find_plan`/`handle`/`main` maskeli AST'si görüldü;
+  tam kaynak, API/sender/offset sözleşmeleri ve doğrudan VPS erişimi hâlâ yok.
+- Yeni `V5OwnerBridge` gözlenen mevcut owner akışı için staging'de hazır:
+  tam update ACL, sonuç/outbox sonrası atomik checkpoint, restart/PENDING
+  kurtarma, gönderim öncesi UNKNOWN, eşleşen JSON ACK ve sanitized hata.
+  Poller/sender/servis yok. Eski `/paper` callback'i bağlanmış sayılmaz.
+  Ayrıntılar: [V5_OWNER_BRIDGE.md](V5_OWNER_BRIDGE.md).
 - IMPLEMENTED / OFFLINE TESTED: #7 üstünde ayrı V7 geliştirmesi; ortak command
   registry, snapshot/karar kaynağı, GRID + V6 momentum hook'u, 4H/BTC/ATR,
   ayrı sürümlü 600 USDT paper profili, 2 x 300 USDT atomik rezervasyon,
@@ -16,10 +26,11 @@
   400/400, 15m/1H/4H/BTC, canlı TR origin ve timestamp/sequence doğrulandı.
   Bu yalnız runner snapshot'larıdır; VPS_REAL_API_VERIFIED=false. Yerelde
   PUBLIC_HTTP_UNAVAILABLE / DATA_UNVERIFIED; global fallback yok.
-- V6 gerçek kabul hâlâ başarısız: BTC-USDT beş dakikalık işlem penceresi
-  REST sayfa bütçesine sığmadı (`INCOMPLETE_FLOW_TRADE_WINDOW`); BTC-TRY
-  ticker/defter uyumu reddedildi. Eksik CVD sinyal/başarı diye gösterilmez.
-- 365 offline regresyon geçti. Enstrüman kataloğunun 1 MB aşması için yalnız
+- V6 gerçek runner kabulünde BTC-USDT/SOL-USDT tam beş dakikalık flow geçti;
+  BTC-TRY stale/ticker-book kontrollerinde reddedilmeye devam ediyor. İlk
+  eksik pencere sonuçları aşağıda tarihçe olarak tutulur; eksik CVD kabul edilmez.
+- 380 offline regresyon (15 yeni V5 bridge testi dahil). Son exact-head CI
+  sonucu PR'da ayrıca raporlanır. Enstrüman kataloğunun 1 MB aşması için yalnız
   katalog bütçesi sınırlandırılarak ayrıldı; açık parite hedefi korunur;
   tüm pair'leri reddedilen V6 smoke JSON'da da `ok=false` döndürür.
 - `c1b42511514dcee0d706ddb69706ae4ccad6cc12` public koşusunda V6 SOL-USDT
@@ -37,9 +48,15 @@
   karar/çevrim replay, bildirim sağlığı yokken giriş engeli, muhasebe, restart
   ve kalıcı halt kabulünü çalıştırır. Telegram göndermez; pozisyon açmayı bilerek
   engeller. Canlı veride iki pozisyon açılması veya V5 aktivasyonu kanıtı değildir.
+- Önceki head `68a6fc9` gerçek public koşusu `39830584486`: attempt1 3/6,
+  attempt2 4/6; toplam workflow başarısız. Paper safety ilk denemede
+  top-of-book uyuşmazlığıyla reddedildi, bir kez tekrarında geçti. İki karar da
+  risk >3 ve downtrend nedeniyle NO TRADE, 600 nakit/0 rezerv/0 pozisyon;
+  restart/replay/halt geçti. Bağımsız SOL top-of-book ve BTC-TRY stale reddi
+  sürdü. Sürekli veri akışı veya iki açık paper pozisyon kabulü değildir.
 - TELEGRAM_VERIFIED=false; ACTIVATED=false. Bu çalışmada gerçek bot üzerinde
-  doğrulanan komut **0**. V5 kaynakları ve VPS/SSH/remote shell yok;
-  servis/scheduler/Python/aktif commit/dispatcher durumu BLOKE.
+  uçtan uca doğrulanan komut **0**. Kısmi kaynak/runtime ekran kanıtı üretim
+  aktivasyonu değildir; scheduler/bağımlılıklar/aktif commit/state doğrulanmadı.
 - Yeni poller/sender veya üretim servisi değişikliği yok. main merge yok.
   Private API ve gerçek emirler yok; LIVE_TRADING=false korunur.
 - Ayrıntılı sekiz bölümlü rapor, bağımlılık denetimi, çağrılabilir sınır,
