@@ -48,6 +48,7 @@ class ReadOnlyTRClient:
         if (type(timeout) not in (int, float) or not 1 <= timeout <= 15
                 or type(max_response_bytes) is not int or not 4096 <= max_response_bytes <= 2_000_000):
             raise TradingError("INVALID_PUBLIC_HTTP_POLICY")
+        self._default_transport = opener is None
         self._opener = opener if opener is not None else _default_opener()
         self._timeout, self._max_bytes = timeout, max_response_bytes
         self._pacer = pacer if pacer is not None else _SHARED_PACER

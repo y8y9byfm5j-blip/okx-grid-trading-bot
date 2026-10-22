@@ -118,9 +118,12 @@ def aggregate_coins(reports, pairs, ticker_volumes, *, now, previous=None, unive
 
 
 class MoneyFlowScanner:
-    def __init__(self, *, client=None, policy=None, clock_ms=None):
+    def __init__(self, *, client=None, policy=None, clock_ms=None, fee_rate="0.001"):
         self.client=client if client is not None else ReadOnlyTRClient()
         self.policy=policy if policy is not None else FlowPolicy()
+        self.fee_rate=number(fee_rate)
+        if not 0<=self.fee_rate<=Decimal('.02'):
+            raise TradingError('INVALID_FLOW_FEE')
         self.clock_ms=clock_ms if clock_ms is not None else lambda:time.time_ns()//1000000
         self._lock=threading.RLock()
         self.cursors={}
@@ -193,7 +196,7 @@ class MoneyFlowScanner:
                     'volume_24h_usdt':metric(quote_to_usdt(ticker['volCcy24h'],metadata['quote'],fx,now)),
                     'fx':fx if metadata['quote']=='TRY' else {'method':'USDT_IDENTITY','rate':'1'},
                     'indicators':indicators,'flow':flow,'book':book,'rules':metadata,'live_enabled':False}
-            report['execution']=execution_estimate(rawbook,metadata['quote'],fx,now,notional=self.policy.paper_notional)
+            report['execution']=execution_estimate(rawbook,metadata['quote'],fx,now,notional=self.policy.paper_notional,fee=self.fee_rate)
             report['selection']=score_flow(report,self.policy,btc_return)
             if max(number(report['execution'][k]) for k in ('buy_slippage','sell_slippage'))>self.policy.max_slippage:
                 report['selection']['eligible']=False

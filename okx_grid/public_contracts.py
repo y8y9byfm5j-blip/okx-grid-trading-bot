@@ -19,11 +19,17 @@ PUBLIC_PATHS = {
     "books": "/api/v5/market/books",
     "candles": "/api/v5/market/candles",
 }
-PERIODS = {"15m": 900000, "1H": 3600000}
+PERIODS = {"15m": 900000, "1H": 3600000, "4H": 14400000}
 
 
 def request_spec(kind, instrument=None, *, bar=None):
     """Return only an allowlisted GET contract. Never sign, send, or accept URLs."""
+    if kind == "grid_candles":
+        instrument = symbol(instrument)
+        if bar not in PERIODS:
+            raise TradingError("UNSUPPORTED_BAR")
+        return {"method": "GET", "origin": TR_ORIGIN, "path": PUBLIC_PATHS["candles"],
+                "params": {"instId": instrument, "bar": bar, "limit": "22"}}
     if kind in {"flow_candles", "trades", "history_trades", "flow_books", "flow_ticker"}:
         from .flow_contracts import BARS, spot_symbol
         instrument = spot_symbol(instrument)

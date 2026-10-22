@@ -1,5 +1,5 @@
 """Offline reference command boundary, NOT the unverified V5 Telegram adapter."""
-import re
+from .commands import parse_command
 
 from .control import pin, receipt, record, snapshot
 from .domain import TradingError, paper_only, timestamp
@@ -23,9 +23,7 @@ def handle_update(trader, update, *, allowed_chat, allowed_user, now):
             or chat.get("type") != "private" or sender.get("is_bot") is not False
             or any(k in message for k in ("forward_origin", "forward_from", "sender_chat", "via_bot", "edit_date"))):
         raise TradingError("TELEGRAM_UNAUTHORIZED")
-    text = message.get("text")
-    if not isinstance(text, str) or len(text) > 100 or not re.fullmatch(r"/(?:durum|radar|paraakisi|grid|paper(?: pause| halt)?|analiz [A-Z0-9]{1,24}(?:-(?:USDT|TRY))?)", text):
-        raise TradingError("TELEGRAM_COMMAND_REJECTED")
+    text = parse_command(message.get("text")).text
     at = timestamp(message.get("date"))
     with trader._transaction():
         trader._audit_all()
@@ -41,11 +39,11 @@ def handle_update(trader, update, *, allowed_chat, allowed_user, now):
         if cursor is not None and uid <= cursor:
             raise TradingError("TELEGRAM_OLD_UPDATE")
         last = trader._meta("telegram_last_at")
-        if last is not None and now <= last:
+        if last is not None and now <= last and text not in {"/emergency_stop", "/paper halt", "/paper pause", "/papergrid stop"}:
             raise TradingError("TELEGRAM_RATE_LIMIT")
-        if text == "/paper pause":
+        if text in {"/paper pause", "/papergrid stop"}:
             trader.pause()
-        elif text == "/paper halt":
+        elif text in {"/paper halt", "/emergency_stop"}:
             trader.halt()
         state = trader.status()
         result = {"mode": "paper", "duplicate": False, "command": text, "state": state,

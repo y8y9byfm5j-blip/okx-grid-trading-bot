@@ -1,5 +1,11 @@
 # OKX TR GRID Radar & Paper Trader
 
+V7 görev emri için [güncel entegrasyon raporu](docs/V7_INTEGRATION.md): ortak
+GRID/momentum komut hook'u ve ayrı **600 USDT / 2 x 300 USDT** paper profili.
+Üretim V5 erişimi ve gerçek TR smoke başarısı olmadan Telegram aktivasyonu yok;
+DATA_UNVERIFIED durumunda otomatik paper başlangıcı engellenir. Gerçek emirler
+kapalıdır. Bu rapor eski 500 USDT CLI örneklerinden ayrı V7 sözleşmesini tanımlar.
+
 Bu dal, **bağımsız ve yalnızca paper işlem yapan** bir çekirdek ekler. İncelenen
 `main` dalında VPS'teki v5 kaynakları yoktu. Bu kod, çalışan botun yerine
 kurulmuş veya mevcut Telegram/OKX bağlantısına entegre edilmiş değildir.

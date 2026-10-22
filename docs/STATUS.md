@@ -1,4 +1,30 @@
-# İnceleme ve teslim durumu — 20 Ekim 2026
+# İnceleme ve teslim durumu — 22 Ekim 2026
+
+## V7 görev emri — güncel durum
+
+- IMPLEMENTED / OFFLINE TESTED: #7 üstünde ayrı V7 geliştirmesi; ortak command
+  registry, snapshot/karar kaynağı, GRID + V6 momentum hook'u, 4H/BTC/ATR,
+  ayrı sürümlü 600 USDT paper profili, 2 x 300 USDT atomik rezervasyon,
+  kısmi dolum/iptal/mutabakat, min order, replay ve kalıcı halt.
+- Eski v5-paper-500 konfigürasyonu/defteri korunur. Yeni 600 profilinin
+  hedef planlanan risk sınırları bot başına 3 / toplam 6 USDT; gerçekleşen
+  stop zararı garanti değildir. Momentum yönlü emir planı olmadan izleme üretir.
+- Yeni kod ve eski 295 test birlikte test edilir. Tam sonuçlar, commit SHA ve
+  üç sürümlü CI/staging kanıtı draft PR teslimatında raporlanır.
+- REAL_API_VERIFIED=false: gerçek legacy ve V7 smoke denemeleri
+  PUBLIC_HTTP_UNAVAILABLE / exit 2. DATA_UNVERIFIED; global fallback yok.
+- TELEGRAM_VERIFIED=false; ACTIVATED=false. Bu çalışmada gerçek bot üzerinde
+  doğrulanan komut **0**. V5 kaynakları ve VPS/SSH/remote shell yok;
+  servis/scheduler/Python/aktif commit/dispatcher durumu BLOKE.
+- Yeni poller/sender veya üretim servisi değişikliği yok. main merge yok.
+  Private API ve gerçek emirler yok; LIVE_TRADING=false korunur.
+- Ayrıntılı sekiz bölümlü rapor, bağımlılık denetimi, çağrılabilir sınır,
+  staging/rollback ve erişim ihtiyaçları: [V7_INTEGRATION.md](V7_INTEGRATION.md).
+
+Aşağıdaki 20 Ekim kayıtları önceki artımlı teslimlerin tarihçesidir; eski
+`/radar` yönlendirmesi yeni V7 hook'unun GRID radar tanımı yerine kullanılmaz.
+
+---
 
 ## Issue #6 — V6 Smart Money Flow, artımlı teslim 1
 
