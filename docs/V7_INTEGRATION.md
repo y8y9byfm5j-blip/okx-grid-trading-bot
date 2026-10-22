@@ -22,6 +22,14 @@ sayısal byte boyutu ve HTML/JSON sınıfı teşhisi eklendi; yanıt gövdesi, c
 sunucu header'ları veya hata metinleri kaydedilmez. HTML, `PUBLIC_NON_JSON_RESPONSE`
 ile reddedilir. JSON byte üst sınırı artırılmadı; gerçek API kapısı kapalıdır.
 
+İkinci probe (`0687d36ffa07e2802b7fede1040e5cfdf342035d`, Actions
+`39738793179`) teşhisi: `time` sonrası `/api/v5/public/instruments` HTTP 200,
+JSON yanıtı 1.000.001 byte sınırında kesiliyor. HTML veya doğrulanmış piyasa
+snapshot'ı söz konusu değil; katalog henüz tamamıyla okunamadı. Yalnız üç piyasa
+consumer'ının enstrüman kataloğu için açık 8 MB bütçesi eklendi. Generic istemci
+varsayılanı ve kitap/ticker/mum sınırları korunur; 5000 satır ve JSON şema kontrolü
+devam eder. Katalog büyümesi global veri kaynağına geçiş gerekçesi değildir.
+
 22 Ekim 2026. Bu kaynaklar mevcut V5 için çağrılabilir entegrasyon sınırıdır.
 Yeni Telegram botu, poller, scheduler, gönderen veya üretim veritabanı kurulmaz.
 **Üretim V5 entegrasyonu BLOKE; gerçek emirler KAPALI.**

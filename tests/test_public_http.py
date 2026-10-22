@@ -152,6 +152,21 @@ class SafePublicTransport(unittest.TestCase):
         self.assertEqual(client.last_response['content_type'],'NOT_RECEIVED')
         self.assertNotIn('PRIVATE_MESSAGE',json.dumps(client.last_response))
 
+    def test_catalog_budget_is_explicit_bounded_and_does_not_expand_book_budget(self):
+        response=FakeResponse({'code':'0','data':[{'payload':'x'*5000}]})
+        client=make_client(opener=FakeOpener(response),max_response_bytes=4096,max_catalog_bytes=8192)
+        self.assertEqual(client.fetch('instruments')['code'],'0')
+        with self.assertRaisesRegex(TradingError,'PUBLIC_RESPONSE_TOO_LARGE'):
+            client.fetch('books','BTC-USDT')
+        generic=make_client(opener=FakeOpener(response),max_response_bytes=4096)
+        with self.assertRaisesRegex(TradingError,'PUBLIC_RESPONSE_TOO_LARGE'):
+            generic.fetch('instruments')
+
+    def test_invalid_catalog_budgets_rejected(self):
+        for limit in (0, True, 8_000_001, '8000000'):
+            with self.subTest(limit=limit), self.assertRaisesRegex(TradingError,'INVALID_PUBLIC_CATALOG_POLICY'):
+                make_client(max_catalog_bytes=limit)
+
 
 if __name__ == "__main__":
     unittest.main()

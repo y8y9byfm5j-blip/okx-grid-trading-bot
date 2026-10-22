@@ -119,7 +119,7 @@ def aggregate_coins(reports, pairs, ticker_volumes, *, now, previous=None, unive
 
 class MoneyFlowScanner:
     def __init__(self, *, client=None, policy=None, clock_ms=None, fee_rate="0.001"):
-        self.client=client if client is not None else ReadOnlyTRClient()
+        self.client=client if client is not None else ReadOnlyTRClient(max_catalog_bytes=8_000_000)
         self.policy=policy if policy is not None else FlowPolicy()
         self.fee_rate=number(fee_rate)
         if not 0<=self.fee_rate<=Decimal('.02'):

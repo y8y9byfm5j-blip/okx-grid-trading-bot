@@ -51,7 +51,7 @@ class TRMarketData:
     """
     def __init__(self, policy, *, client=None, clock_ms=None):
         self.policy = policy
-        self.client = client if client is not None else ReadOnlyTRClient()
+        self.client = client if client is not None else ReadOnlyTRClient(max_catalog_bytes=8_000_000)
         self.clock_ms = clock_ms if clock_ms is not None else lambda: time.time_ns() // 1_000_000
         self.cursors = {}
         self.last_health = {"ok": False, "reason": "NOT_CHECKED", "live_enabled": False}

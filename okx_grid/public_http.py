@@ -44,13 +44,17 @@ _SHARED_PACER = RequestPacer()
 
 class ReadOnlyTRClient:
     def __init__(self, *, opener=None, timeout=8, max_response_bytes=1_000_000,
-                 pacer=None, sleep=time.sleep, jitter=None):
+                 pacer=None, sleep=time.sleep, jitter=None, max_catalog_bytes=None):
         if (type(timeout) not in (int, float) or not 1 <= timeout <= 15
                 or type(max_response_bytes) is not int or not 4096 <= max_response_bytes <= 2_000_000):
             raise TradingError("INVALID_PUBLIC_HTTP_POLICY")
+        if max_catalog_bytes is not None and (type(max_catalog_bytes) is not int or not 4096 <= max_catalog_bytes <= 8_000_000):
+            raise TradingError("INVALID_PUBLIC_CATALOG_POLICY")
         self._default_transport = opener is None
         self._opener = opener if opener is not None else _default_opener()
         self._timeout, self._max_bytes = timeout, max_response_bytes
+        # Explicit consumer opt-in; the generic client's previous budget remains.
+        self._catalog_max_bytes = max_response_bytes if max_catalog_bytes is None else max_catalog_bytes
         self._pacer = pacer if pacer is not None else _SHARED_PACER
         self._sleep = sleep
         self._jitter = jitter if jitter is not None else lambda: random.uniform(0, 0.1)
@@ -94,6 +98,7 @@ class ReadOnlyTRClient:
             spec["params"]["after"] = after
         query = urlencode(spec["params"])
         url = TR_ORIGIN + spec["path"] + ("?" + query if query else "")
+        read_limit = self._catalog_max_bytes if kind == "instruments" else self._max_bytes
         for attempt in range(4):
             request = Request(url, method="GET", headers={"Accept": "application/json", "User-Agent": "OKXTR-GridPaperReadOnly/1.0"})
             self._pacer.wait()
@@ -107,11 +112,11 @@ class ReadOnlyTRClient:
                         if self._retry(attempt, status):
                             continue
                         raise TradingError("PUBLIC_HTTP_STATUS_ERROR")
-                    raw = response.read(self._max_bytes + 1)
+                    raw = response.read(read_limit + 1)
                     self._observe_response(kind, spec, status, getattr(response, "headers", None), raw)
                     if self.last_response["payload_class"] == "HTML" or self.last_response["content_type"] == "HTML":
                         raise TradingError("PUBLIC_NON_JSON_RESPONSE")
-                    if len(raw) > self._max_bytes:
+                    if len(raw) > read_limit:
                         raise TradingError("PUBLIC_RESPONSE_TOO_LARGE")
             except TradingError:
                 raise
