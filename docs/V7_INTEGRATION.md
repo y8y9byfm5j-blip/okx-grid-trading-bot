@@ -41,6 +41,16 @@ genişlemesi düzeltildi; bare coin hâlâ quote'ları birleştirir. V6 smoke t�
 pariteler reddedildiğinde artık JSON `ok=false` üretir. SOL teşhisi için top of
 book uyuşmazlığı ayrı hata koduna ayrıldı; tutarlılık koşulu gevşetilmedi.
 
+Dördüncü probe (`c8753329b07d44b282853ea499753a0dfbdcc7ae`, Actions
+`39740099724`): BTC-USDT ve SOL-USDT gerçek capture geçti (kitap yaşları
+98 / 331 ms). SOL snapshot
+`c968bb0c482188186faa434d2f47759474d8c7dffaf2cbf31d3f6845880dd656`.
+V6 BTC-USDT `INCOMPLETE_FLOW_TRADE_WINDOW`, BTC-TRY
+`INCOHERENT_FLOW_SNAPSHOTS` ile reddedildi; bu iki kontrol başarısızdır.
+Sonraki probe aynı görüntü üzerinde ortak 300 USDT plan/ücret/risk kararını da
+hesaplar; defter, pozisyon veya emir oluşturmaz. `NO TRADE` geçerli bir karardır,
+veri GET testinin başarılı olması işlem izni verildiği anlamına gelmez.
+
 22 Ekim 2026. Bu kaynaklar mevcut V5 için çağrılabilir entegrasyon sınırıdır.
 Yeni Telegram botu, poller, scheduler, gönderen veya üretim veritabanı kurulmaz.
 **Üretim V5 entegrasyonu BLOKE; gerçek emirler KAPALI.**
@@ -90,9 +100,11 @@ kanıtlanmış değildir.
 
 ## 3. Başarısız kontroller
 
-Gerçek `tools/public_smoke.py` ve `tools/v7_smoke.py --allow-public-network
+Yerel gerçek `tools/public_smoke.py` ve `tools/v7_smoke.py --allow-public-network
 --symbol BTC-USDT` denemeleri: `PUBLIC_HTTP_UNAVAILABLE`, exit 2.
-**REAL_API_VERIFIED=false; DATA_UNVERIFIED.** Global OKX, relay, proxy veya
+**VPS_REAL_API_VERIFIED=false; yerelde DATA_UNVERIFIED.** Ayrı runner'daki
+başarılı BTC/SOL snapshot'ları yukarıda kayıtlıdır. V6 BTC kabulü eksik işlem
+penceresi/ticker uyumsuzluğu nedeniyle hâlâ başarısızdır. Global OKX, relay, proxy veya
 sentetik fiyatla bu başarısızlık örtülmez. Resmî dokümana erişilebilmesi gerçek
 API bağlantısının çalıştığı anlamına gelmez.
 
@@ -194,8 +206,8 @@ edilmelidir; hook key whitelist'i sessizce gevşetilmemiştir.
   Alternatif kaynak incelemesi için sadece dokuz redakte edilmiş kanonik kaynak
   ve gizli bilgi içermeyen servis/dispatcher bilgileri sağlanabilir; bu yöntem
   gerçek Telegram/servis erişiminin yerine geçmez.
-- Gerçek public smoke için çalıştırma ortamının `https://tr.okx.com` çıkışı
-  çalışmalıdır. Bu ortamda gerçek bağlantı sağlanamadı.
+- VPS paper testi için o ortamın `https://tr.okx.com` çıkışı doğrulanmalıdır.
+  İzole GitHub runner'ında BTC/SOL bağlantısı geçti; VPS'e taşınmış kanıt değildir.
 - Kaynaklar ve staging testleri hazır olunca üretim dağıtımı ayrıca açık onay
   gerektirir. Bu görevde dağıtım veya gerçek para emri izni yoktur.
 

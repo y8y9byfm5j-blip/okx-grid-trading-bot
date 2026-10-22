@@ -11,8 +11,17 @@
   stop zararı garanti değildir. Momentum yönlü emir planı olmadan izleme üretir.
 - Yeni kod ve eski 295 test birlikte test edilir. Tam sonuçlar, commit SHA ve
   üç sürümlü CI/staging kanıtı draft PR teslimatında raporlanır.
-- REAL_API_VERIFIED=false: gerçek legacy ve V7 smoke denemeleri
-  PUBLIC_HTTP_UNAVAILABLE / exit 2. DATA_UNVERIFIED; global fallback yok.
+- ISOLATED_TR_SNAPSHOT_VERIFIED=true: `c8753329b07d44b282853ea499753a0dfbdcc7ae`
+  Actions `39740099724` üzerinde BTC-USDT ve SOL-USDT V7 GET-only smoke geçti;
+  400/400, 15m/1H/4H/BTC, canlı TR origin ve timestamp/sequence doğrulandı.
+  Bu yalnız runner snapshot'larıdır; VPS_REAL_API_VERIFIED=false. Yerelde
+  PUBLIC_HTTP_UNAVAILABLE / DATA_UNVERIFIED; global fallback yok.
+- V6 gerçek kabul hâlâ başarısız: BTC-USDT beş dakikalık işlem penceresi
+  REST sayfa bütçesine sığmadı (`INCOMPLETE_FLOW_TRADE_WINDOW`); BTC-TRY
+  ticker/defter uyumu reddedildi. Eksik CVD sinyal/başarı diye gösterilmez.
+- 353 offline regresyon geçti. Enstrüman kataloğunun 1 MB aşması için yalnız
+  katalog bütçesi sınırlandırılarak ayrıldı; açık parite hedefi korunur;
+  tüm pair'leri reddedilen V6 smoke JSON'da da `ok=false` döndürür.
 - TELEGRAM_VERIFIED=false; ACTIVATED=false. Bu çalışmada gerçek bot üzerinde
   doğrulanan komut **0**. V5 kaynakları ve VPS/SSH/remote shell yok;
   servis/scheduler/Python/aktif commit/dispatcher durumu BLOKE.
