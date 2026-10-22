@@ -7,7 +7,7 @@ import threading
 from functools import wraps
 
 from .domain import TradingError, canonical, number, positive, precise
-from .flow_contracts import (BARS, FlowPolicy, book_snapshot, candle_indicators, candles,
+from .flow_contracts import (BARS, MAX_HISTORY_PAGES, TRADE_CAPTURE_BUDGET_MS, FlowPolicy, book_snapshot, candle_indicators, candles,
                              discover, fresh, fx_rate, metric, quote_to_usdt, score_flow, spot_symbol, taker_flow)
 from .public_contracts import TR_ORIGIN, _one, _rows, milliseconds
 from .public_http import ReadOnlyTRClient
@@ -136,8 +136,12 @@ class MoneyFlowScanner:
         page=self.client.fetch('trades',instrument)
         pages=[page]
         seen_cursors=set()
-        for _ in range(10):
+        for index in range(MAX_HISTORY_PAGES+1):
+            if not 0<=self._now()-end<=TRADE_CAPTURE_BUDGET_MS:
+                raise TradingError('FLOW_TRADE_CAPTURE_TOO_SLOW')
             rows=_rows(page)
+            if len(rows)>(500 if index==0 else 100):
+                raise TradingError('FLOW_TRADE_PAGE_TOO_LARGE')
             try:
                 oldest=min(milliseconds(r['ts']) for r in rows)
                 cursor=min((r['tradeId'] for r in rows),key=int)
@@ -145,12 +149,33 @@ class MoneyFlowScanner:
                 raise TradingError('INVALID_FLOW_TRADE') from None
             if oldest<=end-300000:
                 return pages
+            if index==MAX_HISTORY_PAGES:
+                break
             if cursor in seen_cursors:
                 raise TradingError('FLOW_PAGINATION_STALLED')
             seen_cursors.add(cursor)
             page=self.client.fetch('history_trades',instrument,after=cursor)
             pages.append(page)
         raise TradingError('INCOMPLETE_FLOW_TRADE_WINDOW')
+
+    def _indicators(self,instrument,start):
+        # Candles are read after pagination, near the current book. A candle
+        # still marked 0 after its boundary stays unusable; re-read once rather
+        # than treating elapsed wall time as exchange confirmation.
+        for attempt in range(2):
+            replies={}
+            for bar in BARS:
+                if not 0<=self._now()-start<=30000:
+                    raise TradingError('FLOW_CAPTURE_TOO_SLOW')
+                replies[bar]=self.client.fetch('flow_candles',instrument,bar=bar)
+            now=self._now()
+            if not 0<=now-start<=30000:
+                raise TradingError('FLOW_CAPTURE_TOO_SLOW')
+            try:
+                return candle_indicators(replies,now)
+            except TradingError as error:
+                if attempt or error.code not in {'FLOW_CANDLE_FINALIZATION_PENDING','MISSING_COMPLETED_FLOW_CANDLE'}:
+                    raise
 
     @serialized
     def reconnect(self,instrument):
@@ -172,8 +197,8 @@ class MoneyFlowScanner:
         try:
             start=self._now()
             metadata=pairs[instrument]
-            replies={bar:self.client.fetch('flow_candles',instrument,bar=bar) for bar in BARS}
             pages=self._trade_pages(instrument,start)
+            indicators=self._indicators(instrument,start)
             for attempt in range(3):
                 ticker=_one(self.client.fetch('flow_ticker',instrument))
                 rawbook=self.client.fetch('flow_books',instrument)
@@ -192,7 +217,13 @@ class MoneyFlowScanner:
                 # Independent REST endpoints can move between GETs. Re-read
                 # both, never substitute a book price into the old ticker.
             positive(ticker['last'])
-            indicators=candle_indicators(replies,now)
+            if any(end!=now//BARS[bar]*BARS[bar] for bar,end in indicators['bar_end_ms'].items()):
+                # The ticker/book capture itself crossed a bar boundary. Do
+                # not combine a stale indicator window with the current book.
+                indicators=self._indicators(instrument,start)
+                now=self._now()
+                fresh(at,now)
+                fresh(book['cursor']['at_ms'],now)
             flow=taker_flow(pages,instrument,metadata['quote'],fx,start_ms=start-300000,end_ms=start)
             report={'instrument':instrument,'base':metadata['base'],'quote':metadata['quote'],'source_origin':TR_ORIGIN,
                     'as_of_ms':now,'ticker_ts_ms':at,'flow_window_end_ms':start,

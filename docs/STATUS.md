@@ -19,7 +19,7 @@
 - V6 gerçek kabul hâlâ başarısız: BTC-USDT beş dakikalık işlem penceresi
   REST sayfa bütçesine sığmadı (`INCOMPLETE_FLOW_TRADE_WINDOW`); BTC-TRY
   ticker/defter uyumu reddedildi. Eksik CVD sinyal/başarı diye gösterilmez.
-- 356 offline regresyon geçti. Enstrüman kataloğunun 1 MB aşması için yalnız
+- 361 offline regresyon geçti. Enstrüman kataloğunun 1 MB aşması için yalnız
   katalog bütçesi sınırlandırılarak ayrıldı; açık parite hedefi korunur;
   tüm pair'leri reddedilen V6 smoke JSON'da da `ok=false` döndürür.
 - `c1b42511514dcee0d706ddb69706ae4ccad6cc12` public koşusunda V6 SOL-USDT
@@ -27,6 +27,10 @@
   aday yoktu. BTC pair'leri yine ticker/book uyumsuzluğuyla reddedildi.
   V6 bu uyumsuzlukta her iki endpoint'i en fazla üç kez taze alır; eşleşme,
   süre, sıra ve veri yaşı kontrolleri korunur. Kalıcı uyumsuzluk işlem açamaz.
+- Pagination'ın son sayfası limit hatasından önce incelenir. En fazla 40 x 100
+  history + 500 recent işlem ve 15 saniyelik trade bütçesi uygulanır; toplam
+  30 saniye korunur. Mumlar pagination'dan sonra alınır; teyit bekleyen pencere
+  bir kez yenilenir. Teyitsiz mum kabul edilmez; dakika sınırı tekrar denetlenir.
 - TELEGRAM_VERIFIED=false; ACTIVATED=false. Bu çalışmada gerçek bot üzerinde
   doğrulanan komut **0**. V5 kaynakları ve VPS/SSH/remote shell yok;
   servis/scheduler/Python/aktif commit/dispatcher durumu BLOKE.

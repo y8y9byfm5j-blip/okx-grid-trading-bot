@@ -80,6 +80,21 @@ bütçesi korunur, stale/structural/sequence hataları yeniden denenmez. Kalıc�
 uyuşmazlık snapshot/cursor/cache doğrulaması üretmez. Bu sonuçlar sürekli akış
 veya Telegram üretim entegrasyonu kanıtı değildir.
 
+Son V6 pagination/mum düzeltmesi: daha önce son izinli history yanıtı alınıyor
+ancak incelenmeden INCOMPLETE_FLOW_TRADE_WINDOW dönüyordu; hata önce regresyonla
+yeniden üretildi. Son sayfa artık doğrulanır. 500 recent + en fazla 40 x 100
+history satırı, 15 saniyelik trade toplama bütçesi ve mevcut 30 saniye toplam
+bütçe ile sınırlıdır; pencerenin tam 5 dakika olması zorunluluğu değişmez.
+Mumlar pagination'dan sonra alınır. Geçmişte kalan confirm=0 bar
+FLOW_CANDLE_FINALIZATION_PENDING üretir ve tüm TF'ler yalnız bir kez taze
+alınır; teyit uydurulmaz. Gelecek barın confirm=1 olması hâlâ hatadır.
+Ticker/book alımı dakika sınırını geçerse gösterge penceresi yeniden doğrulanır.
+361 offline test, son sayfa/limit/deadline, kalıcı ve geçici teyit gecikmesi,
+future-confirm reddi ve gerçek zaman sınırı geçişinin sentetik regresyonlarını
+kapsar. Bu yerel sonuç gerçek API veya Telegram başarısı olarak gösterilmez.
+Sözleşme: https://tr.okx.com/docs-v5/en/
+(history max100, recent max500; confirm=0 tamamlanmamış, confirm=1 tamamlanmış).
+
 22 Ekim 2026. Bu kaynaklar mevcut V5 için çağrılabilir entegrasyon sınırıdır.
 Yeni Telegram botu, poller, scheduler, gönderen veya üretim veritabanı kurulmaz.
 **Üretim V5 entegrasyonu BLOKE; gerçek emirler KAPALI.**
