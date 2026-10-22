@@ -12,6 +12,14 @@
   kurtarma, gönderim öncesi UNKNOWN, eşleşen JSON ACK ve sanitized hata.
   Poller/sender/servis yok. Eski `/paper` callback'i bağlanmış sayılmaz.
   Ayrıntılar: [V5_OWNER_BRIDGE.md](V5_OWNER_BRIDGE.md).
+- Son düzeltme: bir parite hatasından sonra başka paritenin başarılı GET'inin
+  durum ekranında arızayı örtmesi regresyonla yeniden üretildi. `/durum` artık
+  son kalıcı çevrim receipt'inden hatayı/pariteyi gösterir; restart ve tek
+  başarılı GET bunu temizlemez. Hatasız yeni çevrim pause'u otomatik kaldırmaz.
+- Birleşik sentetik owner kabulü: komutlar → iki ayrı 300 USDT rezervi → partial
+  fill → replay/restart → emergency stop → gap çıkışı; ayrıca min-order dust
+  rezervleri, UNKNOWN teslim ve kesinti/resume doğrulandı. Bu gerçek Telegram
+  veya canlı veride iki aktif pozisyon kabulü değildir.
 - IMPLEMENTED / OFFLINE TESTED: #7 üstünde ayrı V7 geliştirmesi; ortak command
   registry, snapshot/karar kaynağı, GRID + V6 momentum hook'u, 4H/BTC/ATR,
   ayrı sürümlü 600 USDT paper profili, 2 x 300 USDT atomik rezervasyon,
@@ -29,7 +37,7 @@
 - V6 gerçek runner kabulünde BTC-USDT/SOL-USDT tam beş dakikalık flow geçti;
   BTC-TRY stale/ticker-book kontrollerinde reddedilmeye devam ediyor. İlk
   eksik pencere sonuçları aşağıda tarihçe olarak tutulur; eksik CVD kabul edilmez.
-- 380 offline regresyon (15 yeni V5 bridge testi dahil). Son exact-head CI
+- 392 offline regresyon (15 bridge ve 12 yeni çevrim/teşhis/birleşik kabul testi dahil). Son exact-head CI
   sonucu PR'da ayrıca raporlanır. Enstrüman kataloğunun 1 MB aşması için yalnız
   katalog bütçesi sınırlandırılarak ayrıldı; açık parite hedefi korunur;
   tüm pair'leri reddedilen V6 smoke JSON'da da `ok=false` döndürür.
@@ -48,6 +56,9 @@
   karar/çevrim replay, bildirim sağlığı yokken giriş engeli, muhasebe, restart
   ve kalıcı halt kabulünü çalıştırır. Telegram göndermez; pozisyon açmayı bilerek
   engeller. Canlı veride iki pozisyon açılması veya V5 aktivasyonu kanıtı değildir.
+- Public paper probe reddi artık `phase=PAPER_CYCLE` ve en fazla iki paritenin
+  allowlist edilmiş hata kodlarını verir. Payload/URL/özel state veya rastgele
+  exception metni yazılmaz. Eksik neden uydurulmaz; ret başarılı sayılmaz.
 - Önceki head `68a6fc9` gerçek public koşusu `39830584486`: attempt1 3/6,
   attempt2 4/6; toplam workflow başarısız. Paper safety ilk denemede
   top-of-book uyuşmazlığıyla reddedildi, bir kez tekrarında geçti. İki karar da

@@ -84,6 +84,24 @@ crash-after-accept, sanitized hata, offset, restart, PENDING kurtarma,
 UNKNOWN/ACK, aynı saniyede acil durdurma ve kalıcı halt'ı kapsar. Önceki core,
 paper ve risk testleri de korunur. Piyasaya, Telegram'a veya VPS'e bağlanmaz.
 
+`tests/test_v7_owner_acceptance.py` birleşik staging kabulünü de kapsar:
+native `/gridplan SOL 300`, `/gridplan Suı/USDT 300`, `/papergrid start`,
+iki ayrı rezerv, komut/çevrim replay, kısmi dolum, defter+offset restart'ı,
+`/emergency_stop`, koruyucu gap çıkışı ve kalıcı halt. İkinci senaryoda gap
+sonrası minimum tutarın altında kalan envanter kapanmış sayılmaz; iki botun
+600 USDT rezervi korunur. UNKNOWN teslim ve public kesinti iki girişi de
+engeller; veri bağlantısının düzelmesi otomatik resume değildir.
+
+Bu testte fiyatlar, ACK JSON'ları ve bildirim sağlığı **sentetiktir**;
+çevrim açıkça `SYNTHETIC_TEST` döndürür. Gerçek Telegram, canlı veride iki
+pozisyon kabulü veya üretim scheduler bağlantısı olarak sunulmaz.
+
+Durum ekranı en son kalıcı çevrim receipt'inin veri hatalarını okur. Daha
+sonraki başarılı tek parite GET'i önceki çevrim hatasını örtemez; API geri
+gelmesi veya yalnız BTC start kontrolü tam çevrim mutabakatının yerine geçmez.
+Hatasız yeni çevrim veri arızasını temizleyebilir fakat pause'u otomatik açmaz.
+Yeni state şeması/reset veya eski defter dönüşümü gerekmez.
+
 Sonraki gerekli kaynaklar: `api(method,data)`, `send(text)`, `load_offset()`,
 `save_offset(offset)`, `refresh_v5()`, `load_plans()` gövdeleri; sekiz diğer
 kanonik V5 modülünün arayüz/durum sözleşmeleri; gerçek servis ExecStart,

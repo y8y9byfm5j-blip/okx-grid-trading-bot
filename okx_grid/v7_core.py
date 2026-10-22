@@ -133,12 +133,23 @@ class V7Core:
         return self.status()
 
     def status(self):
-        state = self.trader.status()
+        with self.trader._transaction():
+            state = self.trader.status()
+            started = bool(self.trader._meta("v7_started"))
+            row = self.trader._db.execute("SELECT id FROM events WHERE kind='v7_cycle' ORDER BY rowid DESC LIMIT 1").fetchone()
+            last_id = row[0].removeprefix("v7_cycle:") if row else None
+            last = receipt(self.trader, row[0], "v7_cycle") if row else None
+            # Read the durable cycle outcome, not just the last GET. A later
+            # good pair must not hide an earlier pair's unresolved failure.
+            data_errors = deepcopy(last["result"]["data_errors"]) if last else []
         health = deepcopy(self.market.last_health)
         if health.get("ok") and self.market._now() - health.get("checked_at_ms", 0) > self.trader.policy.max_market_age * 1000:
             health.update(ok=False, data_status="DATA_UNVERIFIED", reason="STALE_CONNECTION_HEALTH")
+        if data_errors:
+            health.update(ok=False, data_status="DATA_UNVERIFIED", reason="UNRESOLVED_CYCLE_DATA_ERROR",
+                          failed_cycle_id=last_id, data_errors=data_errors)
         return {"mode": "paper", "market": health, "paper": state,
-                "engine_armed": bool(self.trader._meta("v7_started")) and not state["paused"] and not state["halted"],
+                "engine_armed": started and not state["paused"] and not state["halted"] and not data_errors,
                 "service": "V5_NOT_CONNECTED", "scheduler": "NOT_VERIFIED", "telegram": "NOT_VERIFIED",
                 "live_enabled": False, "LIVE_TRADING": False}
 

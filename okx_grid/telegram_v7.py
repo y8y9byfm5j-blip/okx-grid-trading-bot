@@ -80,6 +80,10 @@ def handle_v7_update(core, update, *, allowed_chat, allowed_user, now):
                        f"Realize PnL {p['realized_pnl']} | açık PnL {p['unrealized_pnl']} | ücret {p['fees']} USDT\n"
                        f"Durdurma {value['paper']['halted']} | pause {value['paper']['paused']} | hazır {value['engine_armed']}\n"
                        "Stop zararı garanti etmez. LIVE_TRADING=false | gerçek emirler KAPALI.")
+            if value['market'].get('reason'):
+                message += "\nVeri gerekçesi: " + value['market']['reason']
+            for error in value['market'].get('data_errors', []):
+                message += "\n" + error['instrument'] + " | " + error['reason']
             for bot in value["paper"]["bots"][-4:]:
                 slots = bot["orders"]["slots"]
                 pending = sum(o["side"] != "CANCELLED" for o in slots)

@@ -18,6 +18,35 @@ from okx_grid.v7_market import V7MarketData
 from okx_grid.v7_paper import V7PaperTrader
 
 
+PUBLIC_REJECTIONS = frozenset({
+    "DATA_UNVERIFIED", "UNRECOGNIZED_SNAPSHOT", "UNKNOWN_SYMBOL", "BTC_REGIME_UNAVAILABLE",
+    "PUBLIC_HTTP_UNAVAILABLE", "PUBLIC_HTTP_STATUS_ERROR", "PUBLIC_TLS_ERROR", "PUBLIC_RETRY_EXHAUSTED",
+    "PUBLIC_RESPONSE_ERROR", "PUBLIC_RESPONSE_TOO_LARGE", "PUBLIC_INVALID_JSON", "PUBLIC_NON_JSON_RESPONSE",
+    "PUBLIC_CLOCK_SKEW", "PUBLIC_CAPTURE_TOO_SLOW", "PUBLIC_COOLDOWN_REQUIRED", "PUBLIC_REDIRECT_FORBIDDEN",
+    "INCOHERENT_PUBLIC_SNAPSHOTS", "INCOHERENT_PUBLIC_TOP_OF_BOOK", "INCOMPLETE_400_LEVEL_BOOK",
+    "INCOMPLETE_GRID_CANDLE_WINDOW", "STALE_PUBLIC_DATA", "STALE_MARKET", "FUTURE_PUBLIC_DATA",
+    "STALE_OR_MISSING_COMPLETED_CANDLE", "INVALID_ORDER_BOOK", "INVALID_PUBLIC_DATA",
+    "INVALID_CANDLE", "INVALID_CANDLE_STATE", "INVALID_EXCHANGE_TIMESTAMP", "INVALID_BOOK_SEQUENCE",
+    "CONFLICTING_BOOK_SEQUENCE", "OUT_OF_ORDER_BOOK", "INSTRUMENT_RULE_CHANGED", "REUSED_OR_OLD_BOOK_SEQUENCE",
+})
+
+
+class PaperAcceptanceDataRejected(TradingError):
+    """Bounded public diagnostics; never copy payloads, URLs or exception text."""
+    def __init__(self, cycle):
+        super().__init__("PAPER_ACCEPTANCE_DATA_REJECTED")
+        self.data_errors = []
+        rows = cycle.get("data_errors", [])
+        for row in rows[:2] if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            pair, reason = row.get("instrument"), row.get("reason")
+            self.data_errors.append({
+                "instrument": pair if pair in ("BTC-USDT", "SOL-USDT") else "UNREPORTED_PAIR",
+                "reason": reason if isinstance(reason, str) and reason in PUBLIC_REJECTIONS else "UNREPORTED_DATA_REJECTION",
+            })
+
+
 def acceptance():
     paper_only()
     with tempfile.TemporaryDirectory(prefix="okx-v7-public-paper-") as folder:
@@ -37,7 +66,7 @@ def acceptance():
             now = market._now() // 1000
             cycle = core.run_cycle(cycle_id="public_safety_acceptance", now=now, notification_healthy=False)
             if cycle["data_errors"] or cycle["data_mode"] != "VERIFIED_TR_PUBLIC":
-                raise TradingError("PAPER_ACCEPTANCE_DATA_REJECTED")
+                raise PaperAcceptanceDataRejected(cycle)
             state = cycle["state"]
             portfolio = state["portfolio"]
             if (not state["paused"] or cycle["opened"] or state["bots"] or
@@ -76,8 +105,10 @@ def main(argv=None):
     try:
         result = acceptance()
     except TradingError as error:
-        print(json.dumps({"ok": False, "data_status": "DATA_UNVERIFIED", "live_enabled": False,
-                          "error": error.code}))
+        result = {"ok": False, "data_status": "DATA_UNVERIFIED", "live_enabled": False, "error": error.code}
+        if isinstance(error, PaperAcceptanceDataRejected):
+            result.update(phase="PAPER_CYCLE", data_errors=error.data_errors)
+        print(json.dumps(result))
         return 2
     print(json.dumps(result, sort_keys=True))
     return 0

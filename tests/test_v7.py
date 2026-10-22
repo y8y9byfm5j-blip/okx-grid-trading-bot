@@ -441,6 +441,68 @@ class PaperAcceptanceTests(unittest.TestCase):
 
 
 class PersistenceAndConcurrencyTests(unittest.TestCase):
+    def test_later_good_capture_cannot_hide_an_unresolved_cycle_data_error(self):
+        api, trader, core = make_system()
+        with trader:
+            core.start(now=api.at//1000)
+            for name in ('BTC-USDT','SOL-USDT'):
+                core.decision(name)
+            api.advance()
+            original=api.fetch
+            def fail_one(kind,instrument=None,**kwargs):
+                if kind=='books' and instrument=='BTC-USDT':
+                    raise TradingError('PUBLIC_HTTP_UNAVAILABLE')
+                return original(kind,instrument,**kwargs)
+            with patch.object(api,'fetch',side_effect=fail_one):
+                cycle=core.run_cycle(cycle_id='mixed_data',now=api.at//1000,notification_healthy=True)
+            self.assertEqual(cycle['data_errors'],[{'instrument':'BTC-USDT','reason':'PUBLIC_HTTP_UNAVAILABLE'}])
+            self.assertTrue(core.market.last_health['ok'])  # SOL was captured after the BTC failure.
+            status=core.status()
+            self.assertFalse(status['market']['ok'])
+            self.assertEqual(status['market']['data_status'],'DATA_UNVERIFIED')
+            self.assertEqual(status['market']['reason'],'UNRESOLVED_CYCLE_DATA_ERROR')
+            self.assertEqual(status['market']['data_errors'],cycle['data_errors'])
+            self.assertFalse(status['engine_armed'])
+            core.start(now=api.at//1000)  # A fresh BTC capture alone is not a full-cycle recovery.
+            self.assertEqual(core.status()['market']['reason'],'UNRESOLVED_CYCLE_DATA_ERROR')
+            self.assertFalse(core.status()['engine_armed'])
+
+    def test_full_valid_cycle_clears_data_fault_without_automatically_resuming_buys(self):
+        api,trader,core=make_system()
+        with trader:
+            core.start(now=api.at//1000)
+            core.decision('SOL-USDT')
+            api.advance()
+            api.fail='books'
+            core.run_cycle(cycle_id='failure',now=api.at//1000,notification_healthy=True)
+            api.fail=None
+            api.advance()
+            recovered=core.run_cycle(cycle_id='data_recovered',now=api.at//1000,notification_healthy=True)
+            self.assertEqual(recovered['data_errors'],[])
+            self.assertTrue(core.status()['market']['ok'])
+            self.assertNotIn('data_errors',core.status()['market'])
+            self.assertTrue(core.status()['paper']['paused'])
+            self.assertFalse(core.status()['engine_armed'])
+            self.assertEqual(recovered['opened'],[])
+
+    def test_cycle_data_error_is_retained_after_ledger_restart(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'v7.sqlite3'
+            api,trader,core=make_system(path=path)
+            with trader:
+                core.start(now=api.at//1000)
+                core.decision('SOL-USDT')
+                api.advance()
+                api.fail='books'
+                core.run_cycle(cycle_id='failure',now=api.at//1000,notification_healthy=True)
+            api.fail=None
+            api,trader,core=make_system(path=path,client=api)
+            with trader:
+                core.market.capture('BTC-USDT')
+                self.assertTrue(core.market.last_health['ok'])
+                self.assertEqual(core.status()['market']['reason'],'UNRESOLVED_CYCLE_DATA_ERROR')
+                self.assertTrue(core.status()['paper']['paused'])
+
     def test_empty_real_mode_cycle_does_not_claim_verified_data(self):
         api, trader, core = make_system(synthetic=False)
         with trader:

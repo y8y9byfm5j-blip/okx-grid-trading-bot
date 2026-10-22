@@ -9,6 +9,14 @@ outbox/restart ve gönderim UNKNOWN/ACK sözleşmesi. 15 yeni sentetik test
 eklendi; üretime uygulanmadı. Kesin gözlemler, bilinmeyenler ve kalan
 kapılar: [V5_OWNER_BRIDGE.md](V5_OWNER_BRIDGE.md).
 
+Son staging kabulü native komutlardan iki ayrı 300 USDT rezervasyonuna,
+partial fill/replay/restart ve kalıcı emergency stop'a kadar birlikte test
+edildi. Gap zararı hedef 3 USDT'yi aşabilir; min-order dust kapanmış sayılmaz.
+Bu kabulün fiyatları/ACK/bildirim sağlığı sentetiktir; gerçek Telegram veya
+canlı veride iki pozisyon kanıtı değildir. Durum ekranındaki pariteler arası
+veri hatası maskelemesi giderildi; son çevrim receipt'i restart'ta da okunur.
+Public paper ret raporu artık parite ve sınırlı hata kodlarını içerir.
+
 Aşağıdaki probe kayıtları tarihçedir; son exact-head CI ve public koşu
 sonuçları draft PR #10'da güncel SHA ile raporlanır.
 
