@@ -93,14 +93,22 @@ class V7MarketData:
         replies = {b: self.client.fetch("grid_candles", instrument, bar=b) for b in PERIODS}
         btc_replies = ({b: replies[b] for b in ("1H", "4H")} if instrument == "BTC-USDT" else
                        {b: self.client.fetch("grid_candles", "BTC-USDT", bar=b) for b in ("1H", "4H")})
-        ticker = self.client.fetch("ticker", instrument)
-        books = self.client.fetch("books", instrument)
-        now = self._now()
-        if not 0 <= now - start <= 10000:
-            raise TradingError("PUBLIC_CAPTURE_TOO_SLOW")
-        capture = normalize_market(instrument, instruments, ticker, books, source_origin=TR_ORIGIN,
-                                   now_ms=now, policy=self.policy, previous=self._cursors.get(instrument),
-                                   enforce_policy=False)
+        for attempt in range(3):
+            ticker = self.client.fetch("ticker", instrument)
+            books = self.client.fetch("books", instrument)
+            now = self._now()
+            if not 0 <= now - start <= 10000:
+                raise TradingError("PUBLIC_CAPTURE_TOO_SLOW")
+            try:
+                capture = normalize_market(instrument, instruments, ticker, books, source_origin=TR_ORIGIN,
+                                           now_ms=now, policy=self.policy, previous=self._cursors.get(instrument),
+                                           enforce_policy=False)
+                break
+            except TradingError as error:
+                if attempt == 2 or error.code not in {"INCOHERENT_PUBLIC_TOP_OF_BOOK", "INCOHERENT_PUBLIC_SNAPSHOTS"}:
+                    raise
+                # Discard both replies, retain exact equality and the original
+                # capture deadline. Structural/stale/sequence errors never retry.
         if len(capture.market.bids) != 400 or len(capture.market.asks) != 400:
             raise TradingError("INCOMPLETE_400_LEVEL_BOOK")
         returns, completed = {}, {}

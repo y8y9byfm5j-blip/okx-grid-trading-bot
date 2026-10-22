@@ -120,6 +120,37 @@ class CaptureAndDecisionTests(unittest.TestCase):
         self.assertEqual(set(report["completed_bar_end_ms"]), {"15m", "1H", "4H"})
         self.assertEqual(report["market"]["quote_volume_24h"], "20000000")
 
+    def test_bounded_rest_recapture_never_accepts_mismatched_top(self):
+        for permanent in (False, True):
+            api = SyntheticV7()
+            market = V7MarketData(self.trader.policy, client=api, clock_ms=lambda: api.at)
+            original = api.fetch
+            count = 0
+            def fetch(kind, instrument=None, **kwargs):
+                nonlocal count
+                result = original(kind, instrument, **kwargs)
+                if kind == 'ticker':
+                    count += 1
+                    if permanent or count == 1:
+                        result['data'][0]['bidPx'] = '99.98'
+                return result
+            api.fetch = fetch
+            if permanent:
+                with self.assertRaisesRegex(TradingError, 'INCOHERENT_PUBLIC_TOP_OF_BOOK'):
+                    market.capture('SOL-USDT')
+                self.assertFalse(market._known)
+                self.assertFalse(market._cursors)
+                self.assertEqual(market.last_health['data_status'], 'DATA_UNVERIFIED')
+                expected = 3
+            else:
+                report = market.capture('SOL-USDT')
+                self.assertTrue(market.authentic(report))
+                self.assertEqual(report['market']['bid'], '99.99')
+                self.assertEqual(report['data_status'], 'DATA_UNVERIFIED')
+                expected = 2
+            self.assertEqual(count, expected)
+            self.assertEqual(sum(c[0] == 'books' for c in api.calls), expected)
+
     def test_shared_cached_snapshot_decision_and_fee_configuration(self):
         first = self.core.decision("SOL-USDT")
         self.client.calls.clear()

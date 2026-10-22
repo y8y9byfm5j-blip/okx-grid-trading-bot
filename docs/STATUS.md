@@ -19,7 +19,7 @@
 - V6 gerçek kabul hâlâ başarısız: BTC-USDT beş dakikalık işlem penceresi
   REST sayfa bütçesine sığmadı (`INCOMPLETE_FLOW_TRADE_WINDOW`); BTC-TRY
   ticker/defter uyumu reddedildi. Eksik CVD sinyal/başarı diye gösterilmez.
-- 355 offline regresyon geçti. Enstrüman kataloğunun 1 MB aşması için yalnız
+- 356 offline regresyon geçti. Enstrüman kataloğunun 1 MB aşması için yalnız
   katalog bütçesi sınırlandırılarak ayrıldı; açık parite hedefi korunur;
   tüm pair'leri reddedilen V6 smoke JSON'da da `ok=false` döndürür.
 - `c1b42511514dcee0d706ddb69706ae4ccad6cc12` public koşusunda V6 SOL-USDT

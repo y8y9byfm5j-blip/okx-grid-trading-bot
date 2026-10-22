@@ -71,6 +71,15 @@ yeniden alır; eski ticker'a kitap fiyatı yazmaz. Yalnız tam eşleşme kabul e
 aynı 30 saniye bütçe, yaş/sıra/FX/window kontrolleri korunur. Kalıcı uyumsuzluk
 ve ilk uyumsuzluktan sonraki başarılı capture ayrı regresyonlarla doğrulanır.
 
+`073df98ba2bc469124adf73aeb17dd37233da801`, Actions `39741099830`:
+V6 BTC-USDT (1200 eşsiz işlem, tam 5 dakika) ve SOL-USDT (500 işlem) geçti;
+ikisi düşük RVOL/erken momentum yok/düşüş nedeniyle watch-only. V7 SOL NO TRADE.
+BTC-TRY eski veri ve V7 BTC top-of-book uyumsuzluğuyla kapalı kaldı (3/5).
+Aynı sınırlı iki-endpoint yeniden capture V7'ye de uygulandı; ilk 10 saniye
+bütçesi korunur, stale/structural/sequence hataları yeniden denenmez. Kalıcı
+uyuşmazlık snapshot/cursor/cache doğrulaması üretmez. Bu sonuçlar sürekli akış
+veya Telegram üretim entegrasyonu kanıtı değildir.
+
 22 Ekim 2026. Bu kaynaklar mevcut V5 için çağrılabilir entegrasyon sınırıdır.
 Yeni Telegram botu, poller, scheduler, gönderen veya üretim veritabanı kurulmaz.
 **Üretim V5 entegrasyonu BLOKE; gerçek emirler KAPALI.**
