@@ -174,17 +174,23 @@ class MoneyFlowScanner:
             metadata=pairs[instrument]
             replies={bar:self.client.fetch('flow_candles',instrument,bar=bar) for bar in BARS}
             pages=self._trade_pages(instrument,start)
-            ticker=_one(self.client.fetch('flow_ticker',instrument))
-            rawbook=self.client.fetch('flow_books',instrument)
-            now=self._now()
-            if now-start>30000 or now<start:
-                raise TradingError('FLOW_CAPTURE_TOO_SLOW')
-            if ticker['instId']!=instrument or ticker['instType']!='SPOT':
-                raise TradingError('FLOW_INSTRUMENT_MISMATCH')
-            at=fresh(ticker['ts'],now)
-            book=book_snapshot(rawbook,instrument,now,previous=self.cursors.get(instrument),quote=metadata['quote'],fx=fx)
-            if abs(at-book['cursor']['at_ms'])>2000 or positive(ticker['bidPx'])!=number(book['bid']) or positive(ticker['askPx'])!=number(book['ask']):
-                raise TradingError('INCOHERENT_FLOW_SNAPSHOTS')
+            for attempt in range(3):
+                ticker=_one(self.client.fetch('flow_ticker',instrument))
+                rawbook=self.client.fetch('flow_books',instrument)
+                now=self._now()
+                if now-start>30000 or now<start:
+                    raise TradingError('FLOW_CAPTURE_TOO_SLOW')
+                if ticker['instId']!=instrument or ticker['instType']!='SPOT':
+                    raise TradingError('FLOW_INSTRUMENT_MISMATCH')
+                at=fresh(ticker['ts'],now)
+                book=book_snapshot(rawbook,instrument,now,previous=self.cursors.get(instrument),quote=metadata['quote'],fx=fx)
+                if (abs(at-book['cursor']['at_ms'])<=2000 and positive(ticker['bidPx'])==number(book['bid'])
+                        and positive(ticker['askPx'])==number(book['ask'])):
+                    break
+                if attempt==2:
+                    raise TradingError('INCOHERENT_FLOW_SNAPSHOTS')
+                # Independent REST endpoints can move between GETs. Re-read
+                # both, never substitute a book price into the old ticker.
             positive(ticker['last'])
             indicators=candle_indicators(replies,now)
             flow=taker_flow(pages,instrument,metadata['quote'],fx,start_ms=start-300000,end_ms=start)

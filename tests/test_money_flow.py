@@ -229,6 +229,32 @@ class FlowContracts(unittest.TestCase):
 
 
 class FlowScannerTests(unittest.TestCase):
+    def test_rest_top_mismatch_recaptures_both_and_keeps_same_strict_gate(self):
+        for permanent in (False,True):
+            api=FakeFlowAPI()
+            original=api.fetch
+            calls=0
+            def fetch(kind,instrument=None,**kwargs):
+                nonlocal calls
+                result=original(kind,instrument,**kwargs)
+                if kind=='flow_ticker':
+                    calls+=1
+                    if permanent or calls==1:
+                        result['data'][0]['bidPx']='99.98'
+                return result
+            api.fetch=fetch
+            flow=scanner(api)
+            result=flow.scan_batch(target='TEST-USDT')['pairs']['TEST-USDT']
+            if permanent:
+                self.assertEqual(result,{'error':'INCOHERENT_FLOW_SNAPSHOTS'})
+                self.assertNotIn('TEST-USDT',flow.cursors)
+                expected=3
+            else:
+                self.assertNotIn('error',result)
+                expected=2
+            self.assertEqual(calls,expected)
+            self.assertEqual(sum(c[0]=='flow_books' for c in api.calls),expected)
+
     def test_nonterminating_btc_regime_return_is_a_metric_not_raw_input(self):
         api=FakeFlowAPI()
         original=api.fetch

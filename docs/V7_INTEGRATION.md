@@ -61,6 +61,16 @@ verilmesinden kaynaklandı: sentetik regresyonla önce yeniden üretildi, sonra
 mevcut 18 basamaklı derived-metric sözleşmesi kullanılarak düzeltildi. Ham API
 fiyat hassasiyeti kontrolleri korunur; eksik trade-window kapısı gevşetilmez.
 
+`c1b42511514dcee0d706ddb69706ae4ccad6cc12` Actions `39740679552`:
+V7 BTC/SOL plan yolu ve V6 SOL-USDT geçti (3/5; toplam workflow başarısız).
+SOL flow beş dakikayı kapsadı, 500 eşsiz işlem, RVOL 0.2953; skor 39,
+LOW_RVOL/OUTSIDE_EARLY_MOMENTUM/DOWNTREND: aday yok. BTC-USDT/TRY yine
+INCOHERENT_FLOW_SNAPSHOTS ile reddedildi. Bu commit'te üç sürümde 354 test geçti.
+Son düzeltme V6 ticker/book uyumsuzluğunda iki endpoint'i en fazla üç kez
+yeniden alır; eski ticker'a kitap fiyatı yazmaz. Yalnız tam eşleşme kabul edilir;
+aynı 30 saniye bütçe, yaş/sıra/FX/window kontrolleri korunur. Kalıcı uyumsuzluk
+ve ilk uyumsuzluktan sonraki başarılı capture ayrı regresyonlarla doğrulanır.
+
 22 Ekim 2026. Bu kaynaklar mevcut V5 için çağrılabilir entegrasyon sınırıdır.
 Yeni Telegram botu, poller, scheduler, gönderen veya üretim veritabanı kurulmaz.
 **Üretim V5 entegrasyonu BLOKE; gerçek emirler KAPALI.**
