@@ -1,7 +1,14 @@
-# İnceleme ve teslim durumu — 22 Ekim 2026
+# İnceleme ve teslim durumu — 23 Ekim 2026
 
 ## V7 görev emri — güncel durum
 
+- Canlı flow raporu: V7 /paraakisi SOL ve /momentum SOL-USDT doğrudan hedefi
+  inceler. NO TRADE'de de geçerli defter/agresif alış-satış/CVD/RVOL/pencere
+  ölçümleri görünür. Flow sağlığı /durum'da GRID'den ayrı izlenir.
+- Hacim dağılımı baseline'ı restart'ta korunur; yalnız aynı/tam evren ve uygun
+  zaman aralığı karşılaştırılır. Kısmi paydada N/A ve aday reddi; geçerli parite
+  verisi korunur. Hedef analizi radar cursor'ını ilerletmez. Ayrıntılar:
+  [V7_LIVE_FLOW.md](V7_LIVE_FLOW.md). Üretim bağlantısı hâlâ kapalıdır.
 - Son kaynak kanıtı: kullanıcı görüntülerinde mevcut Telegram systemd servisi
   active, `/opt/okx-grid-demo/v5` çalışma dizini ve `/usr/bin/python3.12`
   executable'ı görüldü. `docker` komutu yok; container/venv yokluğu bundan
@@ -37,7 +44,7 @@
 - V6 gerçek runner kabulünde BTC-USDT/SOL-USDT tam beş dakikalık flow geçti;
   BTC-TRY stale/ticker-book kontrollerinde reddedilmeye devam ediyor. İlk
   eksik pencere sonuçları aşağıda tarihçe olarak tutulur; eksik CVD kabul edilmez.
-- 392 offline regresyon (15 bridge ve 12 yeni çevrim/teşhis/birleşik kabul testi dahil). Son exact-head CI
+- 407 offline regresyon (15 bridge, 12 çevrim/teşhis/birleşik kabul ve 15 flow izleme testi dahil). Son exact-head CI
   sonucu PR'da ayrıca raporlanır. Enstrüman kataloğunun 1 MB aşması için yalnız
   katalog bütçesi sınırlandırılarak ayrıldı; açık parite hedefi korunur;
   tüm pair'leri reddedilen V6 smoke JSON'da da `ok=false` döndürür.

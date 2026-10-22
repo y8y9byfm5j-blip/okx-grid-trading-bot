@@ -57,6 +57,11 @@ def parse_command(text):
         args[0] = pair_name(args[0])
         if name == "/gridplan":
             args[1] = format(positive(args[1]), "f")
+    elif name in {"/paraakisi", "/momentum"}:
+        if len(args) > 1:
+            raise TradingError("COMMAND_ARGUMENTS_REJECTED")
+        if args:
+            args[0] = pair_name(args[0])
     elif name in {"/papergrid", "/paper"}:
         options = {"start", "stop", "status"} if name == "/papergrid" else {"pause", "halt"}
         if name == "/paper" and not args:

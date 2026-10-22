@@ -66,8 +66,8 @@ def handle_v7_update(core, update, *, allowed_chat, allowed_user, now):
                 r["instrument"] + " | " + r["action"] + " | " + ",".join(r["reasons"]) +
                 " | snapshot " + r.get("snapshot_id", "HESAPLANAMADI") for r in value["decisions"])
         elif command.name in {"/paraakisi", "/momentum"}:
-            value = core.momentum()
-            message = render_flow(value) + "\n" + value["data_status"] + " | yönlü işlem planı yok: NO TRADE"
+            value = core.momentum(target=command.args[0] if command.args else None)
+            message = render_flow(value, detailed=bool(command.args), include_watch=True) + "\n" + value["data_status"] + " | yönlü işlem planı yok: NO TRADE"
         elif command.name == "/papergrid" and command.args[0] == "start":
             value = core.start(now=now)
             message = "PAPER motoru hazırlandı. Mevcut V5 scheduler bağlantısı: DOĞRULANMADI.\nGerçek emirler KAPALI."
@@ -75,6 +75,7 @@ def handle_v7_update(core, update, *, allowed_chat, allowed_user, now):
             value = core.status()
             p = value["paper"]["portfolio"]
             message = (f"PAPER | V5 servis/scheduler/Telegram: DOĞRULANMADI\nVeri: {value['market']['data_status']}\n"
+                       f"Akış verisi: {value['flow']['data_status']} | {value['flow'].get('reason',value['flow'].get('rotation_status','N/A'))}\n"
                        f"Sermaye {p['initial_equity']} | rezerv {p['reserved_capital']} | boş {p['unallocated_cash']} USDT\n"
                        f"Bot {p['active_bots']}/2 | risk rezerv {p['reserved_planned_risk']} / 6 USDT\n"
                        f"Realize PnL {p['realized_pnl']} | açık PnL {p['unrealized_pnl']} | ücret {p['fees']} USDT\n"

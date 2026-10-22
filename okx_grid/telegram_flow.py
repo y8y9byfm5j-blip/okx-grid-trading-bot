@@ -1,4 +1,5 @@
 """V6 dispatch hook for the existing single V5 owner. Never polls or sends."""
+from decimal import Decimal
 from .automation import _paper_500_only
 from .control import pin, queue_notice, receipt, record, snapshot
 from .domain import TradingError, paper_only
@@ -6,12 +7,27 @@ from .telegram_control import handle_update
 from .telegram_market import handle_market_update
 
 
-def render_flow(scan, *, detailed=False, suppressed=None):
+def _share(value, *, change=False):
+    if value is None:
+        return 'N/A'
+    return format(Decimal(value)*100, '+.4f' if change else '.4f')+(' yüzde puan' if change else '%')
+
+
+def render_flow(scan, *, detailed=False, suppressed=None, include_watch=False):
     lines=['V6 SMART MONEY FLOW | READ-ONLY / PAPER',
            'Kaynak https://tr.okx.com | REST snapshot | as-of ms '+str(scan['as_of_ms']),
            f"Keşfedilen {scan['discovered_pairs']} parite; bu batch {len(scan['batch_pairs'])}; sonraki offset {scan['next_offset']}",
            'Batch kapsamı; tüm piyasa eşzamanlı sıralaması değildir.']
-    shown=scan['coins'][:1] if detailed else scan['top5']
+    shown=(scan['coins'][:1 if detailed else 3] if include_watch else
+           scan['coins'][:1] if detailed else scan['top5'])
+    if include_watch:
+        valid=sum('error' not in row for row in scan['pairs'].values())
+        lines.append(f"Geçerli akış {valid}/{len(scan['batch_pairs'])} parite | "+
+                     'Karşılaştırma: '+scan.get('rotation_status','N/A'))
+        if scan.get('rotation_reference_at_ms') is not None:
+            lines.append('Hacim payı referansı ms '+str(scan['rotation_reference_at_ms']))
+        if not scan['top5']:
+            lines.append('NO TRADE | Geçerli ölçümler izleme için gösterilir; işlem sinyali değildir.')
     if not shown:
         lines.append('YENİ ALARM YOK; tekrarlar veya veri/aday filtreleri nedeniyle sinyal üretilmez.')
         lines.extend('İZLE/RET '+c['coin']+': '+','.join(c['reasons']) for c in scan['coins'][:5])
@@ -26,19 +42,45 @@ def render_flow(scan, *, detailed=False, suppressed=None):
                       f"Book ts {leader['book']['cursor']['at_ms']} | seq {leader['book']['cursor']['sequence']} | flow end {leader['flow_window_end_ms']}",
                       f"24h turnover {leader['volume_24h_usdt']} USDT | quote {leader['quote']} | FX {leader['fx']['method']}",
                       f"Spread {leader['book']['spread_bps']} bps | 0,5% bid/ask derinliği "+str(leader['book']['depth']['0.5pct']),
-                      f"Hacim payı {coin['volume_share_24h']} / pay değişimi {coin['share_change']}"])
+                      f"Hacim payı {_share(coin['volume_share_24h'])} / pay değişimi {_share(coin['share_change'],change=True)}"])
+        if include_watch:
+            book,flow=leader['book'],leader['flow']
+            lines.extend([f"{leader['instrument']} bid/ask {book['bid']}/{book['ask']} {leader['quote']} | seviyeler {book['bid_levels']}/{book['ask_levels']}",
+                          f"Agresif alış {flow['buy_usdt']} / satış {flow['sell_usdt']} USDT | parite CVD {flow['cvd_quote_usdt']}",
+                          f"İşlem penceresi ms {flow['start_ms']}–{flow['end_ms']} | eşsiz işlem {flow['unique_trades']}",
+                          'Coin CVD kapsamı: yalnız ölçülen çiftler; tam kapsam '+str(coin['coverage_complete'])])
         if detailed:
             lines.extend(['Giriş koşulu: bütün veri/risk filtreleri ve gerçekleşen taker teyidi devam etmeli; emir/önerilen giriş fiyatı yok.',
                           'Geçersizlik: stale veri, BTC şoku, taker teyit kaybı, spread/slippage veya derinlik limiti ihlali.',
                           'Hedef/stop fiyatı ve risk/getiri: yapılandırılmış plan yok, HESAPLANMADI.'])
     if suppressed:
         lines.append('Cooldown/dedup nedeniyle tekrar alarm verilmedi: '+','.join(suppressed))
+    if include_watch:
+        if shown:
+            lines.extend('VERİ HATASI '+name+': '+row['error'] for name,row in scan['pairs'].items() if 'error' in row)
+        if scan.get('volume_errors'):
+            lines.append('24h hacim evreni eksik; pay/değişim N/A. Eksik parite '+
+                         str(len({row['instrument'] for row in scan['volume_errors']})))
     lines.extend(['Hacim müşteri bakiyesi değildir; CVD net sermaye girişi değildir.',
                   'Skor bir heuristiktir; kazanç tahmini değildir. Gerçek emirler KAPALI.'])
     text='\n'.join(lines)
-    if len(text)>3500:
+    if len(text)>(3300 if include_watch else 3500):
         # Deterministic bounded output; retain complete structured result privately.
-        text='\n'.join(lines[:4]+[f"{c['coin']} skor {c['score']} | "+','.join(c['reasons']) for c in shown]+lines[-2:])
+        if include_watch:
+            compact=lines[:4]+['NO TRADE | İzleme ölçümleri; tüm piyasa eşzamanlı sıralaması değildir.']
+            for coin in shown:
+                p=coin['leader'];b=p['book'];f=p['flow'];d=b['depth']['0.5pct']
+                compact.extend([f"{p['instrument']} | İZLE | RVOL {p['indicators']['rvol_5m']} | "+','.join(coin['reasons']),
+                    f"Bid/ask {b['bid']}/{b['ask']} {p['quote']} | spread {b['spread_bps']} bps | seviyeler {b['bid_levels']}/{b['ask_levels']}",
+                    f"0,5% bid/ask {d['bid_usdt']}/{d['ask_usdt']} USDT | book ts {b['cursor']['at_ms']}",
+                    f"Agresif alış/satış {f['buy_usdt']}/{f['sell_usdt']} USDT | parite CVD {f['cvd_quote_usdt']}",
+                    f"İşlem penceresi ms {f['start_ms']}–{f['end_ms']} | eşsiz işlem {f['unique_trades']}",
+                    f"24h {p['volume_24h_usdt']} USDT | pay {_share(coin['volume_share_24h'])} | değişim {_share(coin['share_change'],change=True)}"])
+            compact.extend('VERİ HATASI '+name+': '+row['error'] for name,row in scan['pairs'].items() if 'error' in row)
+            compact.extend(['Karşılaştırma: '+scan.get('rotation_status','N/A')]+lines[-2:])
+            text='\n'.join(compact)
+        else:
+            text='\n'.join(lines[:4]+[f"{c['coin']} skor {c['score']} | "+','.join(c['reasons']) for c in shown]+lines[-2:])
     return text
 
 

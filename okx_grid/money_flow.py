@@ -330,7 +330,13 @@ class MoneyFlowScanner:
                     fresh(report['book']['cursor']['at_ms'],now)
                 except TradingError as error:
                     reports[name]={'error':error.code}
-        coins=aggregate_coins(reports,pairs,volume,now=now,previous=previous,universe_hash=universe_hash)
+        if previous is not None and previous.get('universe_hash')!=universe_hash:
+            raise TradingError('INCOMPARABLE_FLOW_ROTATION_BASELINE')
+        # A newly missing/stale denominator must not erase otherwise valid
+        # observed pair data. Shares/rotation remain unavailable and no coin
+        # can rank; the last complete baseline is not replaced by partial data.
+        comparison=previous if len(volume)==len(pairs) else None
+        coins=aggregate_coins(reports,pairs,volume,now=now,previous=comparison,universe_hash=universe_hash)
         # An incomplete turnover denominator cannot produce trustworthy share/rank.
         if len(volume)!=len(pairs):
             for coin in coins:

@@ -9,7 +9,7 @@ from decimal import Decimal
 import hashlib
 
 from .control import notices, pin, queue_notice, receipt, record, snapshot
-from .domain import Market, TradingError, build_plan, identifier, paper_only, timestamp
+from .domain import Market, TradingError, build_plan, identifier, paper_only, symbol, timestamp
 from .v7_decision import PlanningPolicy, decide
 from .v7_paper import V7PaperTrader
 
@@ -94,12 +94,34 @@ class V7Core:
                 "action": "PAPER_CANDIDATES" if any(r["eligible"] for r in results) else "NO TRADE",
                 "live_enabled": False}
 
-    def momentum(self):
+    def momentum(self, *, target=None):
         if self.flow is None:
             raise TradingError("FLOW_SCANNER_NOT_CONFIGURED")
+        if target is not None:
+            target = symbol(target)
         with self.trader._transaction():
-            offset = self.trader._meta("v7_flow_offset") or 0
-        scan = self.flow.scan_batch(offset=offset, limit=3)
+            offset = (self.trader._meta("v7_flow_offset") or 0) if target is None else 0
+            expected = self.trader._meta("v7_flow_universe") if offset else None
+            baseline = self.trader._meta("v7_flow_rotation_baseline")
+        # Compare only distinct snapshots within the existing one-hour limit.
+        if baseline is not None and not 0 < self.flow._now() - baseline['at_ms'] <= 3600000:
+            baseline = None
+        try:
+            scan = self.flow.scan_batch(offset=offset, limit=3, expected_universe=expected,
+                                        previous=baseline, target=target)
+        except TradingError as error:
+            with self.trader._transaction():
+                self.trader._set_meta('v7_flow_health',{'ok':False,'data_status':'DATA_UNVERIFIED',
+                    'reason':error.code,'checked_at_ms':self.flow._now()})
+                if error.code in {"FLOW_UNIVERSE_CHANGED_RESTART_SCAN", "INCOMPARABLE_FLOW_ROTATION_BASELINE"}:
+                    self.trader._set_meta("v7_flow_offset", 0)
+                    self.trader._set_meta("v7_flow_universe", None)
+                    self.trader._set_meta("v7_flow_rotation_baseline", None)
+            raise
+        complete_volume = not scan.get('volume_errors') and scan.get('rotation_baseline') is not None
+        scan['rotation_status'] = ('INCOMPLETE_UNIVERSE_VOLUME' if not complete_volume else
+                                   'COMPARABLE' if baseline is not None else 'BASELINE_STARTED')
+        scan['rotation_reference_at_ms'] = baseline['at_ms'] if baseline is not None and complete_volume else None
         state = self.trader.status()
         active = {b["instrument"].split("-")[0] for b in state["bots"] if b["status"] == "OPEN"}
         scan["snapshot_id"] = snapshot(scan)[1]
@@ -115,7 +137,14 @@ class V7Core:
                                self.flow.client is self.market.client and
                                any('error' not in report for report in scan['pairs'].values()) else "DATA_UNVERIFIED")
         with self.trader._transaction():
-            self.trader._set_meta("v7_flow_offset", scan["next_offset"] or 0)
+            self.trader._set_meta('v7_flow_health',{'ok':any('error' not in r for r in scan['pairs'].values()),
+                'data_status':scan['data_status'],'checked_at_ms':scan.get('as_of_ms',self.flow._now()),
+                'rotation_status':scan['rotation_status'],'volume_coverage_complete':complete_volume})
+            if target is None:
+                self.trader._set_meta("v7_flow_offset", scan["next_offset"] or 0)
+                self.trader._set_meta("v7_flow_universe", scan.get("universe_hash"))
+            if complete_volume:
+                self.trader._set_meta("v7_flow_rotation_baseline", scan['rotation_baseline'])
         return scan
 
     def start(self, *, now):
@@ -136,6 +165,8 @@ class V7Core:
         with self.trader._transaction():
             state = self.trader.status()
             started = bool(self.trader._meta("v7_started"))
+            flow_health = self.trader._meta('v7_flow_health') or {
+                'ok':False,'data_status':'DATA_UNVERIFIED','reason':'NOT_CHECKED'}
             row = self.trader._db.execute("SELECT id FROM events WHERE kind='v7_cycle' ORDER BY rowid DESC LIMIT 1").fetchone()
             last_id = row[0].removeprefix("v7_cycle:") if row else None
             last = receipt(self.trader, row[0], "v7_cycle") if row else None
@@ -148,7 +179,11 @@ class V7Core:
         if data_errors:
             health.update(ok=False, data_status="DATA_UNVERIFIED", reason="UNRESOLVED_CYCLE_DATA_ERROR",
                           failed_cycle_id=last_id, data_errors=data_errors)
-        return {"mode": "paper", "market": health, "paper": state,
+        flow_age = self.flow._now()-flow_health.get('checked_at_ms',0)
+        if flow_health.get('ok') and not -2000<=flow_age<=self.trader.policy.max_market_age*1000:
+            flow_health.update(ok=False,data_status='DATA_UNVERIFIED',
+                               reason='STALE_FLOW_HEALTH' if flow_age>=0 else 'FUTURE_FLOW_HEALTH')
+        return {"mode": "paper", "market": health, "flow": flow_health, "paper": state,
                 "engine_armed": started and not state["paused"] and not state["halted"] and not data_errors,
                 "service": "V5_NOT_CONNECTED", "scheduler": "NOT_VERIFIED", "telegram": "NOT_VERIFIED",
                 "live_enabled": False, "LIVE_TRADING": False}
