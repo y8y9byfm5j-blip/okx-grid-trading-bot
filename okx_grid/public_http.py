@@ -54,6 +54,23 @@ class ReadOnlyTRClient:
         self._pacer = pacer if pacer is not None else _SHARED_PACER
         self._sleep = sleep
         self._jitter = jitter if jitter is not None else lambda: random.uniform(0, 0.1)
+        self.last_response = None
+
+    def _observe_response(self, kind, spec, status, headers=None, raw=None):
+        """Only enum/numeric transport facts; never retain headers or a body."""
+        headers = headers if headers is not None else {}
+        mime = str(headers.get("Content-Type", "")).lower().split(";", 1)[0].strip()
+        length = str(headers.get("Content-Length", ""))
+        first = raw[:256].lstrip() if raw is not None else b""
+        self.last_response = {
+            "kind": kind,
+            "source_origin": TR_ORIGIN, "path": spec["path"],
+            "http_status": status if type(status) is int and 100 <= status <= 599 else None,
+            "content_type": "JSON" if mime == "application/json" or mime.endswith("+json") else "HTML" if mime == "text/html" else "OTHER_OR_MISSING",
+            "content_length": int(length) if length.isascii() and length.isdigit() and len(length) <= 12 else None,
+            "bytes_read": len(raw) if raw is not None else 0,
+            "payload_class": "HTML" if first.startswith(b"<") else "JSON_OBJECT" if first.startswith(b"{") else "OTHER_OR_EMPTY",
+        }
 
     def _retry(self, attempt, status, code="", retry_after=None):
         delay = retry_delay(attempt, status=status, api_code=code, retry_after=retry_after)
@@ -67,6 +84,8 @@ class ReadOnlyTRClient:
 
     def fetch(self, kind, instrument=None, *, bar=None, after=None):
         spec = request_spec(kind, instrument, bar=bar)
+        self.last_response = {"kind": kind, "source_origin": TR_ORIGIN, "path": spec["path"], "http_status": None,
+                              "content_type": "NOT_RECEIVED", "bytes_read": 0, "payload_class": "NOT_RECEIVED"}
         if spec["method"] != "GET" or spec["origin"] != TR_ORIGIN:
             raise TradingError("PUBLIC_REQUEST_NOT_ALLOWED")
         if after is not None:
@@ -83,11 +102,15 @@ class ReadOnlyTRClient:
                     if response.geturl() != url:
                         raise TradingError("PUBLIC_REDIRECT_FORBIDDEN")
                     status = response.status
+                    self._observe_response(kind, spec, status, getattr(response, "headers", None))
                     if status != 200:
                         if self._retry(attempt, status):
                             continue
                         raise TradingError("PUBLIC_HTTP_STATUS_ERROR")
                     raw = response.read(self._max_bytes + 1)
+                    self._observe_response(kind, spec, status, getattr(response, "headers", None), raw)
+                    if self.last_response["payload_class"] == "HTML" or self.last_response["content_type"] == "HTML":
+                        raise TradingError("PUBLIC_NON_JSON_RESPONSE")
                     if len(raw) > self._max_bytes:
                         raise TradingError("PUBLIC_RESPONSE_TOO_LARGE")
             except TradingError:
@@ -95,6 +118,7 @@ class ReadOnlyTRClient:
             except HTTPError as error:
                 try:
                     status = error.code
+                    self._observe_response(kind, spec, status, error.headers)
                     wait = error.headers.get("Retry-After") if error.headers else None
                     if 300 <= status < 400:
                         raise TradingError("PUBLIC_REDIRECT_FORBIDDEN") from None

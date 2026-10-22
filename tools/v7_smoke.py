@@ -28,7 +28,11 @@ def main(argv=None):
              "ask_levels": report["book"]["ask_levels"], "book_age_ms": report["as_of_ms"] - report["book_ts_ms"]}, sort_keys=True))
         return 0
     except TradingError as error:
-        print(json.dumps({"ok": False, "data_status": "DATA_UNVERIFIED", "live_enabled": False, "error": error.code}))
+        diagnostics = getattr(getattr(locals().get("service"), "client", None), "last_response", None)
+        summary = {"ok": False, "data_status": "DATA_UNVERIFIED", "live_enabled": False, "error": error.code}
+        if isinstance(diagnostics, dict):
+            summary["request_diagnostics"] = diagnostics
+        print(json.dumps(summary))
         return 2
 
 

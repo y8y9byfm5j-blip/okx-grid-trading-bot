@@ -18,7 +18,8 @@ def main(argv=None):
     args=parser.parse_args(argv)
     try:
         paper_only()
-        result=MoneyFlowScanner().scan_batch(offset=args.offset,limit=args.limit,target=args.target)
+        scanner=MoneyFlowScanner()
+        result=scanner.scan_batch(offset=args.offset,limit=args.limit,target=args.target)
         summary={k:result[k] for k in ('source_origin','as_of_ms','server_ts_ms','scope','discovered_pairs','excluded_quotes',
                                       'batch_pairs','next_offset','universe_hash','warnings')}
         summary.update(ok=True,live_enabled=False,candidates=[{k:c[k] for k in ('coin','pairs','score','score_breakdown','reasons','as_of_ms')}
@@ -29,7 +30,11 @@ def main(argv=None):
         print(json.dumps(summary,sort_keys=True))
         return 0 if any('error' not in r for r in result['pairs'].values()) else 2
     except TradingError as error:
-        print(json.dumps({'ok':False,'live_enabled':False,'error':error.code}))
+        diagnostics=getattr(getattr(locals().get('scanner'),'client',None),'last_response',None)
+        summary={'ok':False,'live_enabled':False,'error':error.code}
+        if isinstance(diagnostics,dict):
+            summary['request_diagnostics']=diagnostics
+        print(json.dumps(summary))
         return 2
 
 

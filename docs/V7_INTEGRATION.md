@@ -14,6 +14,14 @@ DATA_UNVERIFIED durumunu değiştirmez. Hiçbir servise bağlanmaz, emir veya pa
 pozisyon açmaz. Sonuçlar çalışma logu/summary üzerinden raporlanır; VPS/Telegram
 kapıları bağımsız olarak açık kalır.
 
+İlk izole public probe (`c649f89928234984ce8d4040fd30e20b98b3aacf`, Actions
+`39738156186`): üç istek yolu da `PUBLIC_RESPONSE_TOO_LARGE` / exit 2 ile
+reddedildi. Aynı commit'in üç sürümlü offline CI'ları 344 testle geçti.
+Transport'a yalnız allowlisted istek adı/yolu, HTTP durum kodu, normalize MIME,
+sayısal byte boyutu ve HTML/JSON sınıfı teşhisi eklendi; yanıt gövdesi, cookie,
+sunucu header'ları veya hata metinleri kaydedilmez. HTML, `PUBLIC_NON_JSON_RESPONSE`
+ile reddedilir. JSON byte üst sınırı artırılmadı; gerçek API kapısı kapalıdır.
+
 22 Ekim 2026. Bu kaynaklar mevcut V5 için çağrılabilir entegrasyon sınırıdır.
 Yeni Telegram botu, poller, scheduler, gönderen veya üretim veritabanı kurulmaz.
 **Üretim V5 entegrasyonu BLOKE; gerçek emirler KAPALI.**
