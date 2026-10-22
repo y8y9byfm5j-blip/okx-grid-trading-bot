@@ -51,6 +51,16 @@ Sonraki probe aynı görüntü üzerinde ortak 300 USDT plan/ücret/risk kararı
 hesaplar; defter, pozisyon veya emir oluşturmaz. `NO TRADE` geçerli bir karardır,
 veri GET testinin başarılı olması işlem izni verildiği anlamına gelmez.
 
+Plan probe (`9e926aa8be435c309fe420ae20a11028d8731f95`, Actions
+`39740431122`): BTC ve SOL veri+karar yolu geçti. İkisi de NO TRADE: BTC
+planlanan zarar 4.59153652 USDT, SOL 6.35956025 USDT (>3), ayrıca DOWNTREND.
+Pozisyon/emir sayısı 0; iki paper pozisyonun canlı veride açıldığı iddia edilmez.
+V6 BTC-TRY mum teyidi, SOL-USDT ticker/book uyumu reddedildi. BTC-USDT'deki
+`EXCESS_PRECISION`, nonterminating BTC rejim bölmesinin raw-input validator'ına
+verilmesinden kaynaklandı: sentetik regresyonla önce yeniden üretildi, sonra
+mevcut 18 basamaklı derived-metric sözleşmesi kullanılarak düzeltildi. Ham API
+fiyat hassasiyeti kontrolleri korunur; eksik trade-window kapısı gevşetilmez.
+
 22 Ekim 2026. Bu kaynaklar mevcut V5 için çağrılabilir entegrasyon sınırıdır.
 Yeni Telegram botu, poller, scheduler, gönderen veya üretim veritabanı kurulmaz.
 **Üretim V5 entegrasyonu BLOKE; gerçek emirler KAPALI.**

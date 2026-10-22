@@ -252,7 +252,10 @@ class MoneyFlowScanner:
         if 'BTC-USDT' not in pairs:
             raise TradingError('BTC_REGIME_UNAVAILABLE')
         btc_bar=candles(self.client.fetch('flow_candles','BTC-USDT',bar='1H'),'1H',self._now())[0]
-        btc_return=btc_bar['close']/btc_bar['open']-1
+        # Derived division may repeat; serialize through the bounded metric
+        # contract before score_flow validates it as an input. Raw exchange
+        # price precision remains strictly checked by candles().
+        btc_return=number(metric(btc_bar['close']/btc_bar['open']-1))
         names=sorted(pairs)
         if target is not None:
             # A pair is an exact request; only a bare coin aggregates its quotes.

@@ -229,6 +229,19 @@ class FlowContracts(unittest.TestCase):
 
 
 class FlowScannerTests(unittest.TestCase):
+    def test_nonterminating_btc_regime_return_is_a_metric_not_raw_input(self):
+        api=FakeFlowAPI()
+        original=api.fetch
+        def fetch(kind,instrument=None,**kwargs):
+            result=original(kind,instrument,**kwargs)
+            if kind=='flow_candles' and instrument=='BTC-USDT' and kwargs.get('bar')=='1H':
+                for row in result['data']:
+                    row[1]='100.03'
+            return result
+        api.fetch=fetch
+        result=scanner(api).scan_batch(target='TEST-USDT')
+        self.assertNotIn('error',result['pairs']['TEST-USDT'])
+
     def test_scan_top_rank_has_breakdown_without_any_live_permission(self):
         result=scanner().scan_batch()
         self.assertEqual(result['discovered_pairs'],2)
