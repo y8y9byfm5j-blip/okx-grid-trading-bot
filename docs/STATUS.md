@@ -1,5 +1,36 @@
 # İnceleme ve teslim durumu — 23 Ekim 2026
 
+## Manuel şablon için izleme kurulumu — son geliştirme
+
+- `okxtr-manual-observe-v1` ayrı factory/defter ile hazırdır. Kaynak yalnız
+  TR public Spot; 10M USDT hacim, 10 bps spread, 400/400, trend/BTC/derinlik
+  ve altı zorunlu filtre korunur. Bu profilde net/grid tabanı açıkça %0,10'dur;
+  eski referans planning ve 500 USDT profil değiştirilmedi.
+- `/kriterler` etkin policy/trend/maliyet/risk değerlerini ve kriter kimliğini
+  gösterir. `/grid` ve `/gridplan` aynı snapshot/configuration kararını kullanır.
+  Observation stage'i deftere sabitlenir; start/cycle/direct open kapalıdır,
+  pending execution planı oluşmaz. Hedef 600 USDT profilinde 0 rezerv/0 pozisyon.
+- Kuyrukta eskiyen fiyat/defter/flow raporu, gönderimden önce kaynak zamanı
+  denetlenerek `STALE_TELEGRAM_REPORT` ile değiştirilir. Gerçek wire text +
+  UNKNOWN atomik kaydedilir; eski fiyat ACK'i uyarıyı onaylayamaz. Kalıcı halt
+  teyidi gibi fiyat içermeyen yanıtlar korunur.
+- Mevcut dosya metadata'sı writable constructor'dan önce immutable salt okunur
+  incelenir. Yabancı/500 paper defteri, ACL drift'i ve recovery sidecar'ı kabul
+  edilmez. Regresyon eski defterin byte/izinlerinin değişmediğini doğrular.
+- Yerel `tools/validate.py`: **465 test geçti** (26 yeni setup/komut/teslim
+  regresyonu); 85 dosya güvenlik taraması, derleme ve offline demo başarılı.
+  Eski constructor sırasındaki dosya değişimi testte yakalandı ve düzeltildi.
+- Yeni `tools/v5_observer_smoke.py` gerçek TR transport'u, geçici defter ve
+  sentetik native-update zarfından doğrular; sender çağırmaz, Telegram/VPS kabulü
+  sayılmaz. Yeni CI public matrisi dokuz bağımsız probe içerir; bu commit'in
+  ilk koşu sonuçları ve CI/SHA kanıtları draft PR #10'da ayrıca raporlanır.
+- Üretim V5 kaynağı/tam unit/scheduler/aktif commit/durum incelemesi ve doğrudan
+  VPS erişimi eksik. Bağlantı kataloğunda DigitalOcean/SSH araması sonuç vermedi.
+  **TELEGRAM_VERIFIED=false, ACTIVATED=false; gerçek botta doğrulanan yeni komut 0.**
+  Main merge, servis değişikliği/restart, private API veya gerçek emir yok.
+- Kurulum/kurallar/owner bağlantısı ve kalan kapılar:
+  [MANUAL_OBSERVER_SETUP.md](MANUAL_OBSERVER_SETUP.md).
+
 ## V7 görev emri — güncel durum
 
 - 23 Ekim owner sözleşmesi ilerlemesi: son ekranlar `api`'nin JSON,
@@ -15,7 +46,7 @@
 - `tools/vps_readiness.py` salt okunur source/hash + üç bilinen unit + opt-in
   gerçek TR capture raporu hazırdır. Yerel çalışma VPS kanıtı değildir;
   production-ready veya Telegram verified üretmez.
-- Yerel tam doğrulama: 439 test, derleme, 80 dosya kaynak taraması ve offline
+- Önceki runtime doğrulaması: 439 test, derleme, 80 dosya kaynak taraması ve offline
   demo geçti. Ayrı geçici release staging `staged=true/activated=false` geçti.
   Gerçek yerel readiness denemesi exit 2: kaynak/systemd bu hostta yok; TR
   time GET yanıt alamadı, DATA_UNVERIFIED kaldı. Bu VPS'in ağ sonucu değildir.

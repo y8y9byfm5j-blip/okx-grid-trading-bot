@@ -6,7 +6,7 @@ from .domain import TradingError, positive
 
 REGISTRY = frozenset({"/durum", "/analiz", "/grid", "/radar", "/paraakisi",
                       "/momentum", "/gridplan", "/papergrid", "/emergency_stop",
-                      "/diagnostics", "/paper"})
+                      "/diagnostics", "/paper", "/kriterler"})
 ALIASES = {"/radargrid": "/radar", "/gridstatus": "/papergrid status"}
 
 

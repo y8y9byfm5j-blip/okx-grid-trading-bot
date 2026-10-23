@@ -77,6 +77,11 @@ class V7PaperTrader(PaperTrader):
 
     def open(self, bot_id, plan, market, now, *, report=None):
         paper_only()
+        # The read-only setup pins the same immutable stage as V7Core. Direct
+        # trader calls must not bypass its command/scheduler execution gate.
+        stage = self._meta("v7_execution_stage")
+        if stage == snapshot({"revision": 1, "observation_only": True})[1]:
+            raise TradingError("OBSERVATION_ONLY_EXECUTION_DISABLED")
         self._require_capture(report)
         if plan.capital != Decimal("300"):
             raise TradingError("PROFILE_REQUIRES_300_USDT_PER_BOT")

@@ -2,6 +2,7 @@
 from dataclasses import asdict, dataclass
 from decimal import Decimal
 import hashlib
+from types import MappingProxyType
 
 from .domain import (GridPlan, Market, TradingError, canonical, ceil_step,
                      floor_step, number, positive, precise)
@@ -9,6 +10,8 @@ from .public_contracts import InstrumentRules, TR_ORIGIN
 
 WEIGHTS = {"data": 20, "liquidity": 15, "trend": 15, "btc_regime": 15,
            "grid_economics": 20, "planned_risk": 15}
+GRID_FILTERS = MappingProxyType({"min_return_15m": "0", "min_return_1h": "0", "min_return_4h": "0",
+    "max_return_15m": "0.05", "btc_risk_off_1h": "-0.02", "btc_risk_off_4h": "-0.04"})
 
 
 @dataclass(frozen=True)
@@ -62,11 +65,12 @@ def decide(report, profile, planning, *, capital="300", now_ms):
     except TradingError as error:
         reject("liquidity", error.code)
     trend = {k: number(report["trend"][k]) for k in ("return_15m", "return_1h", "return_4h", "btc_return_1h", "btc_return_4h")}
-    if min(trend[k] for k in ("return_15m", "return_1h", "return_4h")) < 0:
+    if any(trend[k] < number(GRID_FILTERS["min_" + k]) for k in ("return_15m", "return_1h", "return_4h")):
         reject("trend", "DOWNTREND")
-    if trend["return_15m"] > Decimal("0.05"):
+    if trend["return_15m"] > number(GRID_FILTERS["max_return_15m"]):
         reject("trend", "EXCESSIVE_SHORT_MOMENTUM")
-    if trend["btc_return_1h"] <= Decimal("-0.02") or trend["btc_return_4h"] <= Decimal("-0.04"):
+    if (trend["btc_return_1h"] <= number(GRID_FILTERS["btc_risk_off_1h"]) or
+            trend["btc_return_4h"] <= number(GRID_FILTERS["btc_risk_off_4h"])):
         reject("btc_regime", "BTC_RISK_OFF")
     try:
         rules = report["rules"]
@@ -105,7 +109,8 @@ def decide(report, profile, planning, *, capital="300", now_ms):
     eligible = scoring["eligible"] and verified
     if not verified:
         reasons.append("DATA_UNVERIFIED")
-    configuration = {"profile": profile.identity, "planning": asdict(planning), "capital": str(capital)}
+    configuration = {"profile": profile.identity, "planning": asdict(planning), "capital": str(capital),
+                     "grid_filters": dict(GRID_FILTERS)}
     config_id = hashlib.sha256(canonical(configuration).encode()).hexdigest()
     decision_id = hashlib.sha256((report["snapshot_id"] + config_id).encode()).hexdigest()
     return {"decision_id": decision_id, "snapshot_id": report["snapshot_id"], "configuration_id": config_id,
@@ -119,7 +124,8 @@ def decide(report, profile, planning, *, capital="300", now_ms):
             "fee_model": asdict(planning), "profile": profile.identity, "live_enabled": False,
             "market_summary": {"price": str(market.price), "bid": str(market.bid), "ask": str(market.ask),
                                "spread_bps": str(market.spread_bps), "quote_volume_24h_usdt": str(market.quote_volume_24h),
-                               "book_ts_ms": report["book_ts_ms"], "sequence": report["sequence"],
+                               "book_ts_ms": report["book_ts_ms"], "ticker_ts_ms": report["ticker_ts_ms"],
+                               "sequence": report["sequence"],
                                "book_levels": [len(market.bids), len(market.asks)], "trend": report["trend"],
                                "depth_0_5pct": report["book"]["0.5pct"], "depth_1pct": report["book"]["1pct"],
                                "volatility": report["volatility"], "range": report["range"]},

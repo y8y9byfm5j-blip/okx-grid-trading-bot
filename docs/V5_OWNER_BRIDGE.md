@@ -1,5 +1,11 @@
 # Gözlenen V5 Telegram döngüsü için staging bağlantısı
 
+İlk canlı analiz aşamasını kurmak için [manuel izleme factory'si](MANUAL_OBSERVER_SETUP.md)
+eklenmiştir. Bu factory ayrı defter, açık %0,10 net/grid eşiği ve değiştirilemeyen
+observation stage'i seçer; `/papergrid start` ve scheduler/direct-open kapalıdır.
+Gönderimden önce piyasa yanıtları tekrar yaş kontrolünden geçer; stale uyarısının
+gerçek wire text'i UNKNOWN/ACK journal'ında ayrıca sabitlenir.
+
 Durum: **IMPLEMENTED / SYNTHETIC_TESTED; ACTIVATED=false; TELEGRAM_VERIFIED=false**.
 `V5OwnerBridge` ve `V5OwnerAdapter` yalnız mevcut owner tarafından çağrılır.
 Telegram istemcisi, poller veya scheduler başlatmaz. Adaptör yalnız açıkça

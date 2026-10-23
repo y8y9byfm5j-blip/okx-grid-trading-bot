@@ -12,6 +12,11 @@ Kabul şartları: [canlı veri ve aşamalar](docs/LIVE_DATA_ACCEPTANCE.md).
 Mevcut veri yolu REST snapshot'tır; sürekli WebSocket akışı veya üretimde
 Telegram aktivasyonu tamamlanmış sayılmaz.
 
+Manuel seçim şablonu için [yalnız izleme kurulumu](docs/MANUAL_OBSERVER_SETUP.md)
+hazırdır: `/kriterler` etkin kuralları gösterir; bu ayrı profilde net/grid
+alt sınırı %0,10'dur. Paper start/cycle/open kilitlidir; başka bir defter
+benimsenmez. Mevcut V5 owner'ına kaynak incelemesinden sonra bağlanır.
+
 V7 görev emri için [güncel entegrasyon raporu](docs/V7_INTEGRATION.md): ortak
 GRID/momentum komut hook'u ve ayrı **600 USDT / 2 x 300 USDT** paper profili.
 Üretim V5 erişimi ve gerçek TR smoke başarısı olmadan Telegram aktivasyonu yok;

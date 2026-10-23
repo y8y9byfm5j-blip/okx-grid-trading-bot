@@ -102,8 +102,8 @@ class V5OwnerBridge:
                 raise TradingError("TELEGRAM_STALE_UPDATE")
             name = text.strip().split()[0].lower()
             if name in {"/help", "/start"}:
-                result = {"ok": True, "message": "PAPER | /durum /analiz /grid /radar /paraakisi /momentum "
-                          "/gridplan /papergrid /emergency_stop\nGerçek emirler KAPALI."}
+                result = {"ok": True, "message": ("İZLEME" if self.core.observation_only else "PAPER") + " | /durum /analiz /grid /radar /paraakisi /momentum "
+                          "/gridplan /kriterler /papergrid /emergency_stop\nGerçek emirler KAPALI."}
             elif name == "/paper":
                 # The legacy paper_card/state contract has not been reviewed.
                 # Never silently show the new 600 ledger as the old V5 ledger.
@@ -169,8 +169,54 @@ class V5OwnerBridge:
             status = self._notice_delivery(notice_id)
             if status != "PENDING":
                 return {"send_allowed": False, "delivery": status, "live_enabled": False}
+            expired = self._market_reply_expired(notice_id, now)
+            if expired:
+                text = ("DATA_UNVERIFIED | STALE_TELEGRAM_REPORT\n"
+                        "Fiyat/defter raporu teslimden önce eskidi veya saat tutarsız. "
+                        "Güncel veri için komutu yeniden gönder.\nGerçek emirler KAPALI.")
+                self.trader.pause()
+            # Freeze the actual wire text atomically with UNKNOWN. A stale
+            # warning has its own matching ACK; never ACK the withheld quote.
+            record(self.trader, "v5_delivery_text:" + notice_id, "v5_delivery_text", now,
+                   {"text": text, "market_reply_expired": expired})
             mark_notice(self.trader, notice_id, "UNKNOWN", now)
             return {"send_allowed": True, "delivery": "UNKNOWN", "text": text, "live_enabled": False}
+
+    def _market_reply_expired(self, notice_id, now):
+        if not notice_id.startswith("v7u_"):
+            return False  # Cycle summaries are historical event notifications.
+        entry = receipt(self.trader, "v7_command:" + notice_id[4:], "v7_command")
+        if not entry:
+            return False
+        result = entry["result"]
+        command = result.get("command", "").split()
+        if not command or command[0] not in {"/analiz", "/grid", "/gridplan", "/radar", "/paraakisi", "/momentum"}:
+            return False
+        row = self.trader._db.execute("SELECT at FROM events WHERE id=?",
+            ("v7_command:" + notice_id[4:],)).fetchone()
+        times = [timestamp(row[0]) * 1000]
+        def collect(value):
+            if not isinstance(value, dict):
+                return
+            for key in ("as_of_ms", "ticker_ts_ms", "book_ts_ms", "flow_window_end_ms"):
+                if key in value:
+                    times.append(timestamp(value[key]))
+            summary = value.get("market_summary", {})
+            for key in ("ticker_ts_ms", "book_ts_ms"):
+                if key in summary:
+                    times.append(timestamp(summary[key]))
+            book = value.get("book", {})
+            if "cursor" in book:
+                times.append(timestamp(book["cursor"]["at_ms"]))
+        value = result.get("value", {})
+        collect(value)
+        for pair in value.get("pairs", {}).values():
+            collect(pair)
+        for decision in value.get("decisions", []):
+            collect(decision)
+        # Check real source timestamps, not just analysis completion/ACK time.
+        return (any(at - now * 1000 > 2000 for at in times) or
+                now * 1000 - min(times) > self.trader.policy.max_market_age * 1000)
 
     def pending_deliveries(self):
         """Recover unsent bridge replies after restart; UNKNOWN is never retried."""
@@ -210,6 +256,9 @@ class V5OwnerBridge:
         timestamp(now)
         with self.trader._transaction():
             text = self._notice_text(notice_id)
+            wire = receipt(self.trader, "v5_delivery_text:" + notice_id, "v5_delivery_text")
+            if wire is not None:
+                text = wire["text"]
             status = self._notice_delivery(notice_id)
             if status == "PENDING":
                 raise TradingError("TELEGRAM_DELIVERY_NOT_BEGUN")

@@ -7,10 +7,10 @@ from .telegram_flow import render_flow
 from decimal import Decimal
 
 
-def render_decision(value):
+def render_decision(value, *, observation_only=False):
     s = value["scoring"]
     m = value["market_summary"]
-    lines = ["SPOT GRID | PAPER | " + value["data_status"],
+    lines = ["SPOT GRID | " + ("İZLEME" if observation_only else "PAPER") + " | " + value["data_status"],
              value["instrument"] + " | " + value["action"],
              "Snapshot " + value["snapshot_id"], "Karar " + value["decision_id"],
              "as-of ms " + str(value["as_of_ms"]) + " | profil " + value["profile"]["name"],
@@ -18,6 +18,7 @@ def render_decision(value):
              "Ağırlıklar: " + ", ".join(k + "=" + str(v) for k, v in s["weights"].items()),
              "Ret: " + (", ".join(value["reasons"]) or "YOK")]
     lines.extend([f"Fiyat {m['price']} | bid/ask {m['bid']}/{m['ask']} | spread {m['spread_bps']} bps",
+                  f"Fiyat ts {m['ticker_ts_ms']} | book ts {m['book_ts_ms']} (ms)",
                   f"24h quote hacmi {m['quote_volume_24h_usdt']} USDT | book {m['book_levels']} | seq {m['sequence']}",
                   "15m/1H/4H oran: " + "/".join(m["trend"][k] for k in ("return_15m", "return_1h", "return_4h")),
                   "BTC 1H/4H oran: " + "/".join(m["trend"][k] for k in ("btc_return_1h", "btc_return_4h")),
@@ -32,9 +33,34 @@ def render_decision(value):
                       "Planlanan risk " + value["planned_loss_usdt"] + " USDT | bot limit " + value["risk_caps"]["per_bot"]])
     else:
         lines.append("Grid/net/risk: HESAPLANAMADI; eksik değerler sıfır değildir.")
+    if observation_only:
+        lines.append("Yalnız izleme ve plan hesabı; paper pozisyon açılması bu profilde kilitli.")
     lines.extend(["Stop, gerçekleşen zararı 3 USDT ile garanti etmez; gap/likidite kaybı zararı artırabilir.",
                   "Kaynak https://tr.okx.com | anlık REST snapshot | gerçek emirler KAPALI"])
     return "\n".join(lines)
+
+
+def render_criteria(value):
+    grid, flow = value["grid"], value["momentum"]
+    trend, plan = grid["trend"], grid["planning"]
+    return "\n".join([
+        "AKTİF KRİTERLER | " + value["name"] + " | " + value["execution_stage"],
+        "Kriter kimliği " + value["criteria_id"],
+        "Kaynak " + value["source_origin"] + " | REST snapshot | kaldıraç 1 (Spot)",
+        "GRID hacim >= " + grid["min_quote_volume_usdt"] + " USDT / 24h",
+        "Spread <= %" + grid["max_spread_percent"] + " | book her yön " + str(grid["required_book_levels_per_side"]),
+        "Fiyata yakın ±%0,5 derinlik her yön >= " + grid["min_depth_usdt_per_side"] + " USDT",
+        "15m/1H/4H getiri alt sınırı: " + "/".join(trend[k] for k in ("min_return_15m", "min_return_1h", "min_return_4h")),
+        "15m aşırı hareket üst sınırı: " + trend["max_return_15m"] + " (oran)",
+        "BTC risk-off <= " + trend["btc_risk_off_1h"] + " / " + trend["btc_risk_off_4h"] + " (1H/4H oran)",
+        "Net/grid >= %" + grid["min_net_grid_return_percent"] + " | tüm zorunlu filtreler gerekir",
+        "Ücret varsayımı her yön " + plan["fee_rate"] + " | kayma " + plan["slippage_rate"] + " (oran)",
+        "Kademe bant/ücret/minimum tutara göre; üst sınır " + str(plan["max_grids"]),
+        "Planlanan profil: " + grid["total_capital_usdt"] + " USDT, " + str(grid["max_bots"]) + " x " + grid["capital_per_bot_usdt"],
+        "Hedef risk " + grid["planned_risk_per_bot_usdt"] + "/bot, " + grid["total_planned_risk_usdt"] + " toplam; stop garantisi yok",
+        "Erken momentum: RVOL >= " + flow["min_rvol"] + ", agresif alış payı >= " + flow["min_buy_fraction"] + ", CVD > 0",
+        "Momentum ayrı izleme; yönlü emir planı yok. Veri yaşı sınırı " + str(grid["max_market_age_seconds"]) + " sn",
+        "Bu yapılandırma raporu canlı veri veya Telegram aktivasyonu kanıtı değildir. Gerçek emirler KAPALI."])
 
 
 def handle_v7_update(core, update, *, allowed_chat, allowed_user, now):
@@ -59,22 +85,27 @@ def handle_v7_update(core, update, *, allowed_chat, allowed_user, now):
             if not command.args[0].endswith("-USDT"):
                 raise TradingError("UNSUPPORTED_GRID_QUOTE_USDT_REQUIRED")
             value = core.decision(command.args[0], command.args[1] if command.name == "/gridplan" else "300")
-            message = render_decision(value)
+            message = render_decision(value, observation_only=core.observation_only)
+        elif command.name == "/kriterler":
+            value = core.criteria()
+            message = render_criteria(value)
         elif command.name == "/radar":
             value = core.radar()
-            message = "RADAR A | SPOT GRID | " + value["action"] + "\nKapsam: bu batch; tüm piyasa eşzamanlı sıralaması değildir.\n" + "\n".join(
+            message = ("İZLEME | " if core.observation_only else "") + "RADAR A | SPOT GRID | " + value["action"] + "\nKapsam: bu batch; tüm piyasa eşzamanlı sıralaması değildir.\n" + "\n".join(
                 r["instrument"] + " | " + r["action"] + " | " + ",".join(r["reasons"]) +
                 " | snapshot " + r.get("snapshot_id", "HESAPLANAMADI") for r in value["decisions"])
         elif command.name in {"/paraakisi", "/momentum"}:
             value = core.momentum(target=command.args[0] if command.args else None)
-            message = render_flow(value, detailed=bool(command.args), include_watch=True) + "\n" + value["data_status"] + " | yönlü işlem planı yok: NO TRADE"
+            message = ("İZLEME | " if core.observation_only else "") + render_flow(value, detailed=bool(command.args), include_watch=True) + "\n" + value["data_status"] + " | yönlü işlem planı yok: NO TRADE"
         elif command.name == "/papergrid" and command.args[0] == "start":
             value = core.start(now=now)
             message = "PAPER motoru hazırlandı. Mevcut V5 scheduler bağlantısı: DOĞRULANMADI.\nGerçek emirler KAPALI."
         elif command.name in {"/durum", "/diagnostics", "/papergrid", "/emergency_stop", "/paper"}:
             value = core.status()
             p = value["paper"]["portfolio"]
-            message = (f"PAPER | V5 servis/scheduler/Telegram: DOĞRULANMADI\nVeri: {value['market']['data_status']}\n"
+            label = "İZLEME" if core.observation_only else "PAPER"
+            message = (f"{label} | V5 servis/scheduler/Telegram: DOĞRULANMADI\nVeri: {value['market']['data_status']}\n"
+                       f"Aşama: {value['execution_stage']}\n"
                        f"Akış verisi: {value['flow']['data_status']} | {value['flow'].get('reason',value['flow'].get('rotation_status','N/A'))}\n"
                        f"Sermaye {p['initial_equity']} | rezerv {p['reserved_capital']} | boş {p['unallocated_cash']} USDT\n"
                        f"Bot {p['active_bots']}/2 | risk rezerv {p['reserved_planned_risk']} / 6 USDT\n"

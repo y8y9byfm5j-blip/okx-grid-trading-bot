@@ -9,17 +9,21 @@ from decimal import Decimal
 import hashlib
 
 from .control import notices, pin, queue_notice, receipt, record, snapshot
-from .domain import Market, TradingError, build_plan, identifier, paper_only, symbol, timestamp
-from .v7_decision import PlanningPolicy, decide
+from .domain import Market, TradingError, build_plan, canonical, identifier, paper_only, symbol, timestamp
+from .v7_decision import GRID_FILTERS, PlanningPolicy, decide
 from .v7_paper import V7PaperTrader
+from .public_contracts import TR_ORIGIN
 
 
 class V7Core:
-    def __init__(self, trader, market, *, planning=None, flow=None):
+    def __init__(self, trader, market, *, planning=None, flow=None, observation_only=False):
         paper_only()
+        if type(observation_only) is not bool:
+            raise TradingError("INVALID_EXECUTION_STAGE")
         if not isinstance(trader, V7PaperTrader) or market.policy != trader.policy:
             raise TradingError("V7_PROFILE_POLICY_REQUIRED")
         self.trader, self.market = trader, market
+        self.observation_only = observation_only
         trader.bind_source(market)
         self.planning = planning if planning is not None else PlanningPolicy()
         from .flow_contracts import FlowPolicy
@@ -31,6 +35,36 @@ class V7Core:
         self._decisions = {}
         with trader._transaction():
             pin(trader, "v7_planning", asdict(self.planning))
+            pin(trader, "v7_grid_filters", dict(GRID_FILTERS))
+            pin(trader, "v7_execution_stage", {"revision": 1, "observation_only": observation_only})
+            if observation_only and (trader.status()["bots"] or trader._meta("v7_started")):
+                raise TradingError("OBSERVATION_REQUIRES_DEDICATED_LEDGER")
+
+    def criteria(self):
+        """Report the active objects used for decisions; never fetch or arm."""
+        paper_only()
+        policy = self.trader.policy
+        capital = policy.max_bot_capital
+        with self.trader._transaction():
+            setup = self.trader._meta("v5_manual_setup") or {"name": "V7_REFERENCE", "revision": 1}
+        result = {"name": setup["name"], "revision": setup["revision"],
+            "execution_stage": "OBSERVATION_ONLY" if self.observation_only else "PAPER",
+            "source_origin": TR_ORIGIN, "transport": "REST_SNAPSHOT", "leverage": "1",
+            "grid": {"min_quote_volume_usdt": str(policy.min_quote_volume),
+                "max_spread_bps": str(policy.max_spread_bps), "max_spread_percent": str(policy.max_spread_bps / 100),
+                "required_book_levels_per_side": 400, "depth_band_fraction": "0.005",
+                "min_depth_usdt_per_side": str(capital * policy.min_depth_multiple),
+                "trend": dict(GRID_FILTERS), "planning": asdict(self.planning),
+                "min_net_grid_return_percent": str(Decimal(self.planning.min_net_grid_return) * 100),
+                "capital_per_bot_usdt": str(capital), "planned_risk_per_bot_usdt": str(policy.equity * policy.risk_fraction),
+                "total_capital_usdt": str(policy.equity), "total_planned_risk_usdt": str(policy.equity * policy.total_risk_fraction),
+                "max_bots": policy.max_bots, "max_market_age_seconds": policy.max_market_age,
+                "all_mandatory_filters_required": True},
+            "momentum": {k: str(v) for k, v in asdict(self.flow.policy).items()},
+            "momentum_execution": "WATCH_ONLY_DIRECTIONAL_PLAN_REQUIRED", "profile": self.trader.config_identity,
+            "live_enabled": False, "telegram_verified": False}
+        result["criteria_id"] = hashlib.sha256(canonical(result).encode()).hexdigest()
+        return result
 
     def _data_gate(self, report):
         if not self.market.authentic(report):
@@ -60,9 +94,10 @@ class V7Core:
                 raise TradingError("INCONSISTENT_DECISION")
             if old is None:
                 record(self.trader, key, "v7_plan", report["as_of_ms"] // 1000, {"decision": value})
-            pending = self.trader._meta("v7_pending_plans") or {}
-            pending[instrument] = {"capital": str(capital), "decision_id": value["decision_id"]}
-            self.trader._set_meta("v7_pending_plans", dict(list(pending.items())[-100:]))
+            if not self.observation_only:
+                pending = self.trader._meta("v7_pending_plans") or {}
+                pending[instrument] = {"capital": str(capital), "decision_id": value["decision_id"]}
+                self.trader._set_meta("v7_pending_plans", dict(list(pending.items())[-100:]))
         return value
 
     def radar(self, *, limit=3):
@@ -150,6 +185,8 @@ class V7Core:
     def start(self, *, now):
         paper_only()
         timestamp(now)
+        if self.observation_only:
+            raise TradingError("OBSERVATION_ONLY_EXECUTION_DISABLED")
         self._data_gate(self.market.capture("BTC-USDT", refresh=True))
         with self.trader._transaction():
             self.trader._audit_all()
@@ -184,7 +221,8 @@ class V7Core:
             flow_health.update(ok=False,data_status='DATA_UNVERIFIED',
                                reason='STALE_FLOW_HEALTH' if flow_age>=0 else 'FUTURE_FLOW_HEALTH')
         return {"mode": "paper", "market": health, "flow": flow_health, "paper": state,
-                "engine_armed": started and not state["paused"] and not state["halted"] and not data_errors,
+                "engine_armed": not self.observation_only and started and not state["paused"] and not state["halted"] and not data_errors,
+                "execution_stage": "OBSERVATION_ONLY" if self.observation_only else "PAPER",
                 "service": "V5_NOT_CONNECTED", "scheduler": "NOT_VERIFIED", "telegram": "NOT_VERIFIED",
                 "live_enabled": False, "LIVE_TRADING": False}
 
@@ -197,6 +235,8 @@ class V7Core:
         paper_only()
         identifier(cycle_id)
         timestamp(now)
+        if self.observation_only:
+            raise TradingError("OBSERVATION_ONLY_EXECUTION_DISABLED")
         if type(notification_healthy) is not bool:
             raise TradingError("INVALID_NOTIFICATION_HEALTH")
         inputs = {"notification_healthy": notification_healthy}
