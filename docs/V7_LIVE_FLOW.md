@@ -4,6 +4,10 @@
 draft PR #10'da exact SHA ile raporlanır. Üretim V5 bağlantısı ve gerçek
 Telegram e2e henüz doğrulanmadı; **ACTIVATED=false**.
 
+Öncelik sırası: [yalnız canlı TR verisiyle Telegram kabulü](LIVE_DATA_ACCEPTANCE.md)
+→ canlı veride paper GRID kabulü → ayrıca yetkilendirilen gerçek Spot GRID.
+Bugünkü anlık REST görüntüleri sürekli stream veya üretim aktivasyonu değildir.
+
 ## Kaynak ve ölçümlerin anlamı
 
 Mobil uygulama ekranını okumak yerine, sabit `https://tr.okx.com` origin'ine
@@ -85,9 +89,10 @@ defter yolu kabul etmez. Engine hazırlanmaz, pozisyon açılmaz. Çıktının
 `telegram_verified=false`, `production_activated=false` alanları korunur.
 GitHub public probe BTC-USDT ve SOL-USDT için bu yolu ayrıca sınar.
 
-Üretime bağlamak için mevcut V5 `api`, `send`, `load_offset`, `save_offset`,
-`refresh_v5`, `load_plans` gövdeleri ve kalan kaynak/scheduler sözleşmeleri
-hâlâ gerekir. Ayrıntı: [V5_OWNER_BRIDGE.md](V5_OWNER_BRIDGE.md).
+23 Ekim ekranlarında V5 `api`, `send`, `load_offset`, `save_offset`,
+`refresh_v5`, `load_plans` maskeli gövdeleri görüldü; yeniden eksik sayılmaz.
+Tam kaynak/hash, maskeli alanlar ve kalan kaynak/scheduler sözleşmeleri
+yerinde inceleme bekler. Ayrıntı: [V5_OWNER_BRIDGE.md](V5_OWNER_BRIDGE.md).
 İkinci Telegram botu kurulmaz. Shadow, gerçek Telegram ACK/e2e ve ayrı staging
 tamamlanmadan aktivasyon doğrulanmış sayılmaz; servis değişikliği/restart
 ayrıca açık dağıtım onayı gerektirir. Token/.env/private key aktarılmaz.

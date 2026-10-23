@@ -1,5 +1,17 @@
 # OKX TR GRID Radar & Paper Trader
 
+Öncelik: **mevcut Telegram botunda yalnız doğrulanmış OKX TR canlı verisiyle
+izleme ve analiz**. Anlık fiyat/bid/ask, 400+400 emir defteri ve gerçekleşen
+alış/satış akışı aynı TR kaynağından gelir. Veri yaşı/kaynak/snapshot açıkça
+gösterilir; eksik/eski/tutarsız veriyle sinyal veya otomatik giriş üretilmez.
+
+Bu ilk aşamanın gerçek Telegram ve sürekli veri kabulü tamamlandıktan sonra
+600 USDT paper GRID kabulü, ardından ayrıca açıkça yetkilendirilen gerçek
+Spot GRID emir aşamasına geçilir. Şu an gerçek emirler kapalıdır.
+Kabul şartları: [canlı veri ve aşamalar](docs/LIVE_DATA_ACCEPTANCE.md).
+Mevcut veri yolu REST snapshot'tır; sürekli WebSocket akışı veya üretimde
+Telegram aktivasyonu tamamlanmış sayılmaz.
+
 V7 görev emri için [güncel entegrasyon raporu](docs/V7_INTEGRATION.md): ortak
 GRID/momentum komut hook'u ve ayrı **600 USDT / 2 x 300 USDT** paper profili.
 Üretim V5 erişimi ve gerçek TR smoke başarısı olmadan Telegram aktivasyonu yok;
@@ -11,7 +23,8 @@ Bu dal, **bağımsız ve yalnızca paper işlem yapan** bir çekirdek ekler. İn
 kurulmuş veya mevcut Telegram/OKX bağlantısına entegre edilmiş değildir.
 
 Python 3.11–3.13 ve standart kütüphane yeterlidir; API anahtarı veya paket
-kurulumu gerekmez. Komutlar harici servise bağlanmaz ve gerçek emir göndermez.
+kurulumu gerekmez. Aşağıdaki demo/health komutları offline'dır. Public smoke
+araçları yalnız açık ağ seçeneğiyle TR'ye GET yapar; gerçek emir göndermez.
 
 ```bash
 python3 tools/validate.py
@@ -30,8 +43,10 @@ planlanan risk. Eski global varsayılan değiştirilmez. Profil kimliği deftere
 sabitlenir; drift'te işlem reddedilir. Yeni çekirdek V5'in operasyonel alternatifi
 olarak başlatılmaz; kaynakla uyumluluk/shadow kapıları hâlâ kapalıdır.
 
-[Public veri sözleşmeleri](docs/PUBLIC_DATA_CONTRACTS.md) sentetik yanıtlarla test
-edilir; HTTP transport'u veya canlı TR piyasa doğrulaması içermez.
+[Public veri sözleşmeleri](docs/PUBLIC_DATA_CONTRACTS.md) sentetik yanıtlarla
+test edilir; bu testler gerçek API kanıtı değildir. Ayrı salt okunur HTTP
+transport'u ve gerçek runner kabul sonuçları [güncel raporda](docs/STATUS.md)
+belirtilir; VPS/Telegram kabulünün yerine geçmez.
 
 | Parça | Davranış |
 | --- | --- |
