@@ -62,7 +62,8 @@ def main(argv=None):
         if args.v7_report and extra.get('data_status')!='VERIFIED_TR_PUBLIC':
             accepted=False
         summary.update(ok=accepted,live_enabled=False,candidates=[{k:c[k] for k in ('coin','pairs','score','score_breakdown','reasons','as_of_ms')}
-                         for c in result['top5']],pair_status={name:({'error':r['error']} if 'error' in r else
+                         for c in result['top5']],pair_status={name:(({'error':r['error']} |
+                         ({'capture_alignment':r['capture_alignment']} if 'capture_alignment' in r else {})) if 'error' in r else
                          {'quote':r['quote'],'volume_24h_usdt':r['volume_24h_usdt'],'fx':r['fx'],'indicators':r['indicators'],
                           'flow':r['flow'],'spread_bps':r['book']['spread_bps'],'depth':r['book']['depth'],
                           'book_ts_ms':r['book']['cursor']['at_ms'],'selection':r['selection']}) for name,r in result['pairs'].items()})

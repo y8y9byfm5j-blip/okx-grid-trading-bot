@@ -229,6 +229,100 @@ class FlowContracts(unittest.TestCase):
 
 
 class FlowScannerTests(unittest.TestCase):
+    def cached_api(self,ticker_steps,book_steps):
+        api=FakeFlowAPI()
+        original=api.fetch
+        counts={'flow_ticker':0,'flow_books':0}
+        def fetch(kind,instrument=None,**kwargs):
+            result=original(kind,instrument,**kwargs)
+            if kind in counts:
+                steps=ticker_steps if kind=='flow_ticker' else book_steps
+                values=steps[min(counts[kind],len(steps)-1)]
+                counts[kind]+=1
+                bid,ask,at=values[:3]
+                if kind=='flow_ticker':
+                    result['data'][0].update(bidPx=bid,askPx=ask,ts=str(at))
+                else:
+                    result['data'][0]['bids'][0][0]=bid
+                    result['data'][0]['asks'][0][0]=ask
+                    result['data'][0].update(ts=str(at),seqId=values[3])
+            return result
+        api.fetch=fetch
+        return api,counts
+
+    def test_interleaved_rest_cache_matches_later_ticker_to_earlier_real_book(self):
+        api,counts=self.cached_api([('99.98','100.02',NOW-200),('99.99','100.01',NOW-100)],
+            [('99.99','100.01',NOW-100,10),('100','100.02',NOW-50,11)])
+        report=scanner(api).scan_batch(target='TEST-USDT')['pairs']['TEST-USDT']
+        self.assertNotIn('error',report)
+        self.assertEqual(report['capture_alignment']['ticker_observation'],2)
+        self.assertEqual(report['capture_alignment']['book_observation'],1)
+        self.assertEqual(report['book']['cursor']['sequence'],10)
+        self.assertEqual(report['book']['bid'],'99.99')
+        self.assertEqual(report['ticker_ts_ms'],NOW-100)
+        self.assertEqual(counts,{'flow_ticker':2,'flow_books':2})
+
+    def test_interleaved_rest_cache_matches_earlier_ticker_to_newer_real_book(self):
+        api,counts=self.cached_api([('99.99','100.01',NOW-100),('100','100.02',NOW-50)],
+            [('99.98','100.02',NOW-100,10),('99.99','100.01',NOW-100,11)])
+        report=scanner(api).scan_batch(target='TEST-USDT')['pairs']['TEST-USDT']
+        self.assertNotIn('error',report)
+        self.assertEqual(report['capture_alignment']['ticker_observation'],1)
+        self.assertEqual(report['capture_alignment']['book_observation'],2)
+        self.assertEqual(report['book']['cursor']['sequence'],11)
+        self.assertEqual(counts,{'flow_ticker':2,'flow_books':2})
+
+    def test_exact_quotes_outside_existing_two_second_limit_remain_rejected(self):
+        api,counts=self.cached_api([('99.99','100.01',NOW-3000)],[('99.99','100.01',NOW-999,10)])
+        flow=scanner(api)
+        result=flow.scan_batch(target='TEST-USDT')['pairs']['TEST-USDT']
+        self.assertEqual(result['error'],'INCOHERENT_FLOW_SNAPSHOTS')
+        self.assertEqual(result['capture_alignment']['timestamp_delta_ms'],-2001)
+        self.assertTrue(result['capture_alignment']['bid_matches'])
+        self.assertEqual(counts,{'flow_ticker':3,'flow_books':3})
+        self.assertNotIn('TEST-USDT',flow.cursors)
+
+    def test_later_structural_book_fault_is_not_hidden_by_a_prior_observation(self):
+        api,_=self.cached_api([('99.98','100.02',NOW-100),('99.99','100.01',NOW-100)],
+            [('99.99','100.01',NOW-100,10)])
+        original=api.fetch
+        books=0
+        def fetch(kind,instrument=None,**kwargs):
+            nonlocal books
+            result=original(kind,instrument,**kwargs)
+            if kind=='flow_books':
+                books+=1
+                if books==2:
+                    result['data'][0]['asks']=[]
+            return result
+        api.fetch=fetch
+        flow=scanner(api)
+        self.assertEqual(flow.scan_batch(target='TEST-USDT')['pairs']['TEST-USDT'],{'error':'INVALID_FLOW_BOOK'})
+        self.assertNotIn('TEST-USDT',flow.cursors)
+
+    def test_alignment_observations_never_carry_over_between_capture_calls(self):
+        api,_=self.cached_api([('99.98','100.02',NOW-100)]*3+[('99.99','100.01',NOW-100)]*3,
+            [('99.99','100.01',NOW-100,10)]*3+[('99.97','100.03',NOW-100,11)]*3)
+        flow=scanner(api)
+        for _ in range(2):
+            self.assertEqual(flow.scan_batch(target='TEST-USDT')['pairs']['TEST-USDT']['error'],
+                             'INCOHERENT_FLOW_SNAPSHOTS')
+        self.assertEqual(flow.cursors,{})
+
+    def test_smoke_exposes_bounded_alignment_diagnostics_without_turning_failure_green(self):
+        from tools.flow_smoke import main
+        api,_=self.cached_api([('99.98','100.02',NOW-100)],[('99.99','100.01',NOW-100,10)])
+        with patch('tools.flow_smoke.MoneyFlowScanner',return_value=scanner(api)),patch('sys.stdout',io.StringIO()) as output:
+            self.assertEqual(main(['--allow-public-network','--target','TEST-USDT']),2)
+        import json
+        result=json.loads(output.getvalue())
+        self.assertFalse(result['ok'])
+        diagnostics=result['pair_status']['TEST-USDT']['capture_alignment']
+        self.assertEqual(diagnostics['attempts'],3)
+        self.assertFalse(diagnostics['bid_matches'])
+        self.assertNotIn('bidPx',str(diagnostics))
+        self.assertLess(len(str(diagnostics)),500)
+
     def test_rest_top_mismatch_recaptures_both_and_keeps_same_strict_gate(self):
         for permanent in (False,True):
             api=FakeFlowAPI()
@@ -246,7 +340,9 @@ class FlowScannerTests(unittest.TestCase):
             flow=scanner(api)
             result=flow.scan_batch(target='TEST-USDT')['pairs']['TEST-USDT']
             if permanent:
-                self.assertEqual(result,{'error':'INCOHERENT_FLOW_SNAPSHOTS'})
+                self.assertEqual(result['error'],'INCOHERENT_FLOW_SNAPSHOTS')
+                self.assertFalse(result['capture_alignment']['bid_matches'])
+                self.assertEqual(result['capture_alignment']['attempts'],3)
                 self.assertNotIn('TEST-USDT',flow.cursors)
                 expected=3
             else:

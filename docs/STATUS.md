@@ -15,10 +15,22 @@
 - `tools/vps_readiness.py` salt okunur source/hash + üç bilinen unit + opt-in
   gerçek TR capture raporu hazırdır. Yerel çalışma VPS kanıtı değildir;
   production-ready veya Telegram verified üretmez.
-- Yerel tam doğrulama: 433 test, derleme, 80 dosya kaynak taraması ve offline
+- Yerel tam doğrulama: 439 test, derleme, 80 dosya kaynak taraması ve offline
   demo geçti. Ayrı geçici release staging `staged=true/activated=false` geçti.
   Gerçek yerel readiness denemesi exit 2: kaynak/systemd bu hostta yok; TR
   time GET yanıt alamadı, DATA_UNVERIFIED kaldı. Bu VPS'in ağ sonucu değildir.
+- Owner adapter commit'i `fd75532` için üç Python sürümünde 433 test ve exact
+  commit staging geçti (`39973886871`, PR `39973895249`). Public koşu
+  `39973886980` 3/8 geçti: BTC/SOL GRID capture ve paper safety başarılı;
+  beş V6/V7 flow yolu INCOHERENT_FLOW_SNAPSHOTS ile reddedildi. Önceki 7/8
+  sonucu bu yeni koşunun yerine geçmez.
+- Bağımsız REST cache gözlemleri için aynı capture'daki en fazla üç gerçek
+  ticker ve üç book eşleştirilir. Fiyatlar tam eşit, zaman farkı <=2 saniye ve
+  her iki veri taze olmalıdır; ekstra GET/fiyat toleransı yoktur. Başarılı
+  eşleşme seçilen gerçek gözlem numaralarını gösterir. Hatalı book atlanmaz;
+  önceki çağrıdan veri kullanılmaz. Ret teşhisinde yalnız sayısal yaş/zaman
+  farkı, eşleşme bayrakları ve bps farkları vardır. Altı sentetik regresyon
+  eklendi; son canlı kabul sonucu PR'da ayrıca raporlanır.
 
 - Canlı flow raporu: V7 /paraakisi SOL ve /momentum SOL-USDT doğrudan hedefi
   inceler. NO TRADE'de de geçerli defter/agresif alış-satış/CVD/RVOL/pencere

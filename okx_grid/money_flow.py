@@ -13,6 +13,22 @@ from .public_contracts import TR_ORIGIN, _one, _rows, milliseconds
 from .public_http import ReadOnlyTRClient
 
 
+class _IncoherentSnapshots(TradingError):
+    def __init__(self, diagnostics):
+        super().__init__('INCOHERENT_FLOW_SNAPSHOTS')
+        self.diagnostics=diagnostics
+
+
+def _alignment(ticker, at, book, now, attempts):
+    bid,ask=positive(ticker['bidPx']),positive(ticker['askPx'])
+    book_bid,book_ask=number(book['bid']),number(book['ask'])
+    return {'attempts':attempts,'ticker_age_ms':now-at,'book_age_ms':now-book['cursor']['at_ms'],
+            'timestamp_delta_ms':at-book['cursor']['at_ms'],
+            'bid_matches':bid==book_bid,'ask_matches':ask==book_ask,
+            'bid_gap_bps':metric((bid/book_bid-1)*10000),
+            'ask_gap_bps':metric((ask/book_ask-1)*10000)}
+
+
 def serialized(function):
     @wraps(function)
     def wrapped(self,*args,**kwargs):
@@ -199,6 +215,7 @@ class MoneyFlowScanner:
             metadata=pairs[instrument]
             pages=self._trade_pages(instrument,start)
             indicators=self._indicators(instrument,start)
+            tickers,books=[],[]
             for attempt in range(3):
                 ticker=_one(self.client.fetch('flow_ticker',instrument))
                 rawbook=self.client.fetch('flow_books',instrument)
@@ -209,11 +226,35 @@ class MoneyFlowScanner:
                     raise TradingError('FLOW_INSTRUMENT_MISMATCH')
                 at=fresh(ticker['ts'],now)
                 book=book_snapshot(rawbook,instrument,now,previous=self.cursors.get(instrument),quote=metadata['quote'],fx=fx)
-                if (abs(at-book['cursor']['at_ms'])<=2000 and positive(ticker['bidPx'])==number(book['bid'])
-                        and positive(ticker['askPx'])==number(book['ask'])):
+                alignment=_alignment(ticker,at,book,now,attempt+1)
+                tickers.append((ticker,at,attempt+1))
+                books.append((rawbook,book,attempt+1))
+                matched=None
+                # Independent REST caches can interleave observations. Join only
+                # this capture's <=3 tickers/books, preserving exact bid/ask,
+                # <=2s timestamp distance, freshness and the prior book cursor.
+                # No extra GETs, price substitution, tolerance or old-call cache.
+                for candidate_raw,candidate_book,book_index in sorted(books,
+                        key=lambda item:(item[1]['cursor']['sequence'],item[1]['cursor']['at_ms']),reverse=True):
+                    for candidate_ticker,candidate_at,ticker_index in reversed(tickers):
+                        try:
+                            fresh(candidate_at,now)
+                            fresh(candidate_book['cursor']['at_ms'],now)
+                        except TradingError:
+                            continue
+                        candidate=_alignment(candidate_ticker,candidate_at,candidate_book,now,attempt+1)
+                        if (abs(candidate['timestamp_delta_ms'])<=2000 and
+                                candidate['bid_matches'] and candidate['ask_matches']):
+                            matched=(candidate_ticker,candidate_at,candidate_raw,candidate_book,
+                                     {**candidate,'ticker_observation':ticker_index,'book_observation':book_index})
+                            break
+                    if matched:
+                        break
+                if matched:
+                    ticker,at,rawbook,book,alignment=matched
                     break
                 if attempt==2:
-                    raise TradingError('INCOHERENT_FLOW_SNAPSHOTS')
+                    raise _IncoherentSnapshots(alignment)
                 # Independent REST endpoints can move between GETs. Re-read
                 # both, never substitute a book price into the old ticker.
             positive(ticker['last'])
@@ -232,7 +273,8 @@ class MoneyFlowScanner:
                     'volume_24h_native_quote':metric(number(ticker['volCcy24h'])),
                     'volume_24h_usdt':metric(quote_to_usdt(ticker['volCcy24h'],metadata['quote'],fx,now)),
                     'fx':fx if metadata['quote']=='TRY' else {'method':'USDT_IDENTITY','rate':'1'},
-                    'indicators':indicators,'flow':flow,'book':book,'rules':metadata,'live_enabled':False}
+                    'indicators':indicators,'flow':flow,'book':book,'rules':metadata,
+                    'capture_alignment':alignment,'live_enabled':False}
             report['execution']=execution_estimate(rawbook,metadata['quote'],fx,now,notional=self.policy.paper_notional,fee=self.fee_rate)
             report['selection']=score_flow(report,self.policy,btc_return)
             if max(number(report['execution'][k]) for k in ('buy_slippage','sell_slippage'))>self.policy.max_slippage:
@@ -309,6 +351,8 @@ class MoneyFlowScanner:
                 reports[name]=self.analyze_pair(name,pairs,fx,btc_return)
             except TradingError as error:
                 reports[name]={'error':error.code}
+                if isinstance(error,_IncoherentSnapshots):
+                    reports[name]['capture_alignment']=error.diagnostics
         now=self._now()
         if now-started>30000:
             raise TradingError('FLOW_BATCH_STALE_USE_SMALLER_BATCH')

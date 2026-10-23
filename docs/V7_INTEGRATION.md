@@ -18,6 +18,19 @@ readiness senaryosu eklendi. `tools/vps_readiness.py` kaynakları çalıştırma
 hash/unit/TR raporu üretir; yerel/CI sonucu VPS/Telegram kabulü değildir.
 Kullanım: [DEPLOYMENT.md](DEPLOYMENT.md).
 
+Owner adapter `fd75532` exact-head CI/staging geçti (433 test, üç Python).
+Public kabul `39973886980` 3/8: V7 BTC/SOL capture ve paper safety geçti;
+beş flow yolu `INCOHERENT_FLOW_SNAPSHOTS`. Sonraki düzeltme aynı üç denemedeki
+ticker/book gözlemlerini birbirleriyle de eşleştirir. Exact bid/ask, <=2s
+timestamp, freshness, süre/request sınırı ve book cursor kontrolleri korunur;
+cache önceki çağrıdan taşınmaz, bozuk veri/fiyat farkı kabul edilmez. Altı
+sentetik cache-interleaving/ret/teşhis regresyonu eklendi. Bu değişiklik için
+canlı sonuç yalnız yeni exact-head koşudan raporlanır; eski başarı devralınmaz.
+
+Kaynak: [TR Market Data cache davranışı](https://tr.okx.com/docs-v5/en/#order-book-trading-market-data).
+Dokümante edilmiş cache farkı olası nedendir; önceki hatalı koşuların kesin
+kök nedeni raw snapshot'lar bulunmadan iddia edilmez.
+
 Son staging kabulü native komutlardan iki ayrı 300 USDT rezervasyonuna,
 partial fill/replay/restart ve kalıcı emergency stop'a kadar birlikte test
 edildi. Gap zararı hedef 3 USDT'yi aşabilir; min-order dust kapanmış sayılmaz.
