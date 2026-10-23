@@ -1,4 +1,204 @@
-# İnceleme ve teslim durumu — 20 Ekim 2026
+# İnceleme ve teslim durumu — 23 Ekim 2026
+
+## Devralma denetimi — kaynak zamanı ve risk düzeltmeleri
+
+GitHub V7 başlangıcı `149a40cbe3f05c7d8f4727d379ca13e5b706d120`,
+tree `4b45db4020f8b50c5405f4674433581f96cfaf67` ile bütün 85 dosya
+eşleştirildi. PR #1 → #7 → #10 bağımlılıkları ve issue #5/#6/#8/#9 incelendi.
+Main ve üretim servisi değişmedi; özgün VPS V5 kaynağı hâlâ depoda yok.
+
+Bu geliştirme eski 465 testin üzerine 13 regresyon ekler:
+
+- Risk motorunun derinliği artık raporla aynı midpoint ±%0,5 bandından
+  hesaplanır. Spread kadar dışarıdaki duvarlar likiditeyi şişiremez.
+- Karar, cache, radar batch'i, son paper giriş kapısı ve durum raporu;
+  tamamlanma zamanı yanında ticker/book kaynak zamanlarını ve tamamlanmış
+  15m/1H/4H pencerelerini yeniden denetler. Bir mum sınırını aşan cache
+  yenilenir; eski/gelecek kaynakla motor hazır gösterilmez.
+- V7 REST eşleştirmesi aynı capture içinde en fazla üç ticker/üç book
+  gözleminden tam eşleşme seçer. <=2 saniye fark, tazelik, yapı ve önceki
+  cursor kontrolleri korunur. Ek GET, fiyat toleransı veya başka borsa yok.
+- V5/V6 fixture/enjekte istemci çıktıları açık `DATA_UNVERIFIED` taşır;
+  sentetik V5 verisine canlı etiketi basılmaz. V7 gerçek transport kapısı
+  korunur. Karar sözleşmesi revision 2 ile önceki hesaplardan ayrılır.
+- IRYS ekranındaki .02708849–.15712998 bant/.02668216 stop örneği sabit
+  300 USDT'de risk limitini aşar; küçük tahsise indirilip kabul edilmez.
+  Net/grid her aralığın iki yönlü ücret/kayma hesabından gelir; stop zararı
+  garanti etmez. Mevcut 600 USDT / 2×300 / 3 USDT bot / 6 USDT toplam
+  planlanan risk ve observation-only giriş kilitleri değişmedi.
+
+Yerel doğrulama: **478 test**, derleme, kaynak taraması ve offline demo geçti.
+Yeni regresyonlar düzeltmeden önce hataları üretti. Son commit'in üç Python
+sürümü CI, gerçek public GET ve izole release/staging sonuçları PR #10'da
+raporlanır. Önceki public koşu `39988206523` 7/9'dur; BTC-TRY eşleşmesi ve
+ayrı paper BTC capture'ı reddedilmişti. Bu tarihsel sonuç yeni sürümün kabulü
+sayılmaz; başarısız canlı kabul filtre gevşetilerek geçirilmez.
+
+VPS erişim denemesi: bu ortamda SSH ağı `Network is unreachable`, hazır SSH
+agent/kimlik yok. Verilen DigitalOcean droplet sayfası bu tarayıcıda
+`Site Unavailable` gösterdi; DigitalOcean/SSH eklenti araması da sonuçsuzdu.
+Bu, VPS'in kapalı olduğunun kanıtı değildir. Üretim source/unit/state,
+gerçek Telegram ACK ve üretim LIVE ayarı okunamadı.
+**ACTIVATED=false, TELEGRAM_VERIFIED=false; gerçek para emri gönderilmedi.**
+Dağıtım hazırlığı izole, hash doğrulamalı paket/staging ile sınırlıdır;
+[devralma dağıtım kapıları](DEPLOYMENT.md#devralma-sürümünün-kapıları).
+
+## Manuel şablon için izleme kurulumu — son geliştirme
+
+- `okxtr-manual-observe-v1` ayrı factory/defter ile hazırdır. Kaynak yalnız
+  TR public Spot; 10M USDT hacim, 10 bps spread, 400/400, trend/BTC/derinlik
+  ve altı zorunlu filtre korunur. Bu profilde net/grid tabanı açıkça %0,10'dur;
+  eski referans planning ve 500 USDT profil değiştirilmedi.
+- `/kriterler` etkin policy/trend/maliyet/risk değerlerini ve kriter kimliğini
+  gösterir. `/grid` ve `/gridplan` aynı snapshot/configuration kararını kullanır.
+  Observation stage'i deftere sabitlenir; start/cycle/direct open kapalıdır,
+  pending execution planı oluşmaz. Hedef 600 USDT profilinde 0 rezerv/0 pozisyon.
+- Kuyrukta eskiyen fiyat/defter/flow raporu, gönderimden önce kaynak zamanı
+  denetlenerek `STALE_TELEGRAM_REPORT` ile değiştirilir. Gerçek wire text +
+  UNKNOWN atomik kaydedilir; eski fiyat ACK'i uyarıyı onaylayamaz. Kalıcı halt
+  teyidi gibi fiyat içermeyen yanıtlar korunur.
+- Mevcut dosya metadata'sı writable constructor'dan önce immutable salt okunur
+  incelenir. Yabancı/500 paper defteri, ACL drift'i ve recovery sidecar'ı kabul
+  edilmez. Regresyon eski defterin byte/izinlerinin değişmediğini doğrular.
+- Yerel `tools/validate.py`: **465 test geçti** (26 yeni setup/komut/teslim
+  regresyonu); 85 dosya güvenlik taraması, derleme ve offline demo başarılı.
+  Eski constructor sırasındaki dosya değişimi testte yakalandı ve düzeltildi.
+- Yeni `tools/v5_observer_smoke.py` gerçek TR transport'u, geçici defter ve
+  sentetik native-update zarfından doğrular; sender çağırmaz, Telegram/VPS kabulü
+  sayılmaz. Yeni CI public matrisi dokuz bağımsız probe içerir; bu commit'in
+  ilk koşu sonuçları ve CI/SHA kanıtları draft PR #10'da ayrıca raporlanır.
+- Üretim V5 kaynağı/tam unit/scheduler/aktif commit/durum incelemesi ve doğrudan
+  VPS erişimi eksik. Bağlantı kataloğunda DigitalOcean/SSH araması sonuç vermedi.
+  **TELEGRAM_VERIFIED=false, ACTIVATED=false; gerçek botta doğrulanan yeni komut 0.**
+  Main merge, servis değişikliği/restart, private API veya gerçek emir yok.
+- Kurulum/kurallar/owner bağlantısı ve kalan kapılar:
+  [MANUAL_OBSERVER_SETUP.md](MANUAL_OBSERVER_SETUP.md).
+
+## V7 görev emri — güncel durum
+
+- 23 Ekim owner sözleşmesi ilerlemesi: son ekranlar `api`'nin JSON,
+  `send`'in bu API sonucunu döndürdüğünü ve offset'in düz dosya yazımı olduğunu
+  gösterdi. Önceki altı gövde eksiği kapandı; maskeli alanlar, tam kaynak/hash
+  ve üretim bağlantısı hâlâ inceleme bekliyor.
+- `V5OwnerAdapter` mevcut getUpdates sonucunun bütün batch'ini kontrol eder,
+  kimlik/ACL bayraklarını korur ve bridge cursor/outbox'ını kullanır. Mevcut
+  send callback'i için komut/çevrim yanıtlarında UNKNOWN/ACK, restart ve yerel
+  heartbeat kapısı eklendi. Poll hatası kalıcı pause/bounded bekleme önerir;
+  ağın düzelmesi resume değildir. Yeni poller/token/servis veya production
+  import'u yoktur.
+- `tools/vps_readiness.py` salt okunur source/hash + üç bilinen unit + opt-in
+  gerçek TR capture raporu hazırdır. Yerel çalışma VPS kanıtı değildir;
+  production-ready veya Telegram verified üretmez.
+- Önceki runtime doğrulaması: 439 test, derleme, 80 dosya kaynak taraması ve offline
+  demo geçti. Ayrı geçici release staging `staged=true/activated=false` geçti.
+  Gerçek yerel readiness denemesi exit 2: kaynak/systemd bu hostta yok; TR
+  time GET yanıt alamadı, DATA_UNVERIFIED kaldı. Bu VPS'in ağ sonucu değildir.
+- Owner adapter commit'i `fd75532` için üç Python sürümünde 433 test ve exact
+  commit staging geçti (`39973886871`, PR `39973895249`). Public koşu
+  `39973886980` 3/8 geçti: BTC/SOL GRID capture ve paper safety başarılı;
+  beş V6/V7 flow yolu INCOHERENT_FLOW_SNAPSHOTS ile reddedildi. Önceki 7/8
+  sonucu bu yeni koşunun yerine geçmez.
+- Bağımsız REST cache gözlemleri için aynı capture'daki en fazla üç gerçek
+  ticker ve üç book eşleştirilir. Fiyatlar tam eşit, zaman farkı <=2 saniye ve
+  her iki veri taze olmalıdır; ekstra GET/fiyat toleransı yoktur. Başarılı
+  eşleşme seçilen gerçek gözlem numaralarını gösterir. Hatalı book atlanmaz;
+  önceki çağrıdan veri kullanılmaz. Ret teşhisinde yalnız sayısal yaş/zaman
+  farkı, eşleşme bayrakları ve bps farkları vardır. Altı sentetik regresyon
+  eklendi; son canlı kabul sonucu PR'da ayrıca raporlanır.
+
+- Canlı flow raporu: V7 /paraakisi SOL ve /momentum SOL-USDT doğrudan hedefi
+  inceler. NO TRADE'de de geçerli defter/agresif alış-satış/CVD/RVOL/pencere
+  ölçümleri görünür. Flow sağlığı /durum'da GRID'den ayrı izlenir.
+- Hacim dağılımı baseline'ı restart'ta korunur; yalnız aynı/tam evren ve uygun
+  zaman aralığı karşılaştırılır. Kısmi paydada N/A ve aday reddi; geçerli parite
+  verisi korunur. Hedef analizi radar cursor'ını ilerletmez. Ayrıntılar:
+  [V7_LIVE_FLOW.md](V7_LIVE_FLOW.md). Üretim bağlantısı hâlâ kapalıdır.
+- Son kaynak kanıtı: kullanıcı görüntülerinde mevcut Telegram systemd servisi
+  active, `/opt/okx-grid-demo/v5` çalışma dizini ve `/usr/bin/python3.12`
+  executable'ı görüldü. `docker` komutu yok; container/venv yokluğu bundan
+  çıkarılamaz. İmzalar ve `find_plan`/`handle`/`main` maskeli AST'si görüldü;
+  tam kaynak/hash, maskeli alanlar ve doğrudan VPS erişimi hâlâ yok. API/send/
+  offset gövdeleri yukarıda güncellendi; yeniden eksik sayılmaz.
+- Yeni `V5OwnerBridge` gözlenen mevcut owner akışı için staging'de hazır:
+  tam update ACL, sonuç/outbox sonrası atomik checkpoint, restart/PENDING
+  kurtarma, gönderim öncesi UNKNOWN, eşleşen JSON ACK ve sanitized hata.
+  Poller/sender/servis yok. Eski `/paper` callback'i bağlanmış sayılmaz.
+  Ayrıntılar: [V5_OWNER_BRIDGE.md](V5_OWNER_BRIDGE.md).
+- Son düzeltme: bir parite hatasından sonra başka paritenin başarılı GET'inin
+  durum ekranında arızayı örtmesi regresyonla yeniden üretildi. `/durum` artık
+  son kalıcı çevrim receipt'inden hatayı/pariteyi gösterir; restart ve tek
+  başarılı GET bunu temizlemez. Hatasız yeni çevrim pause'u otomatik kaldırmaz.
+- Birleşik sentetik owner kabulü: komutlar → iki ayrı 300 USDT rezervi → partial
+  fill → replay/restart → emergency stop → gap çıkışı; ayrıca min-order dust
+  rezervleri, UNKNOWN teslim ve kesinti/resume doğrulandı. Bu gerçek Telegram
+  veya canlı veride iki aktif pozisyon kabulü değildir.
+- IMPLEMENTED / OFFLINE TESTED: #7 üstünde ayrı V7 geliştirmesi; ortak command
+  registry, snapshot/karar kaynağı, GRID + V6 momentum hook'u, 4H/BTC/ATR,
+  ayrı sürümlü 600 USDT paper profili, 2 x 300 USDT atomik rezervasyon,
+  kısmi dolum/iptal/mutabakat, min order, replay ve kalıcı halt.
+- Eski v5-paper-500 konfigürasyonu/defteri korunur. Yeni 600 profilinin
+  hedef planlanan risk sınırları bot başına 3 / toplam 6 USDT; gerçekleşen
+  stop zararı garanti değildir. Momentum yönlü emir planı olmadan izleme üretir.
+- Yeni kod ve eski 295 test birlikte test edilir. Tam sonuçlar, commit SHA ve
+  üç sürümlü CI/staging kanıtı draft PR teslimatında raporlanır.
+- ISOLATED_TR_SNAPSHOT_VERIFIED=true: `c8753329b07d44b282853ea499753a0dfbdcc7ae`
+  Actions `39740099724` üzerinde BTC-USDT ve SOL-USDT V7 GET-only smoke geçti;
+  400/400, 15m/1H/4H/BTC, canlı TR origin ve timestamp/sequence doğrulandı.
+  Bu yalnız runner snapshot'larıdır; VPS_REAL_API_VERIFIED=false. Yerelde
+  PUBLIC_HTTP_UNAVAILABLE / DATA_UNVERIFIED; global fallback yok.
+- V6 gerçek runner kabulünde BTC-USDT/SOL-USDT tam beş dakikalık flow geçti;
+  BTC-TRY stale/ticker-book kontrollerinde reddedilmeye devam ediyor. İlk
+  eksik pencere sonuçları aşağıda tarihçe olarak tutulur; eksik CVD kabul edilmez.
+- Önceki 407 offline regresyona 16 owner-adapter ve 10 salt okunur readiness
+  senaryosu eklendi. Son toplam ve exact-head CI
+  sonucu PR'da ayrıca raporlanır. Enstrüman kataloğunun 1 MB aşması için yalnız
+  katalog bütçesi sınırlandırılarak ayrıldı; açık parite hedefi korunur;
+  tüm pair'leri reddedilen V6 smoke JSON'da da `ok=false` döndürür.
+- `c1b42511514dcee0d706ddb69706ae4ccad6cc12` public koşusunda V6 SOL-USDT
+  gerçek beş dakikalık flow/multi-TF yolu geçti; düşük RVOL/düşüş nedeniyle
+  aday yoktu. BTC pair'leri yine ticker/book uyumsuzluğuyla reddedildi.
+  V6 bu uyumsuzlukta her iki endpoint'i en fazla üç kez taze alır; eşleşme,
+  süre, sıra ve veri yaşı kontrolleri korunur. Kalıcı uyumsuzluk işlem açamaz.
+- Pagination'ın son sayfası limit hatasından önce incelenir. En fazla 40 x 100
+  history + 500 recent işlem ve 15 saniyelik trade bütçesi uygulanır; toplam
+  30 saniye korunur. Mumlar pagination'dan sonra alınır; teyit bekleyen pencere
+  bir kez yenilenir. Teyitsiz mum kabul edilmez; dakika sınırı tekrar denetlenir.
+- Veri alınmayan/başarısız gerçek-mod çevrimi ve tüm pair'leri reddedilen
+  momentum çıktısı artık VERIFIED_TR_PUBLIC etiketi üretmez.
+- `tools/v7_paper_smoke.py` gerçek TR capture + ayrı geçici 600 USDT defterinde
+  karar/çevrim replay, bildirim sağlığı yokken giriş engeli, muhasebe, restart
+  ve kalıcı halt kabulünü çalıştırır. Telegram göndermez; pozisyon açmayı bilerek
+  engeller. Canlı veride iki pozisyon açılması veya V5 aktivasyonu kanıtı değildir.
+- Public paper probe reddi artık `phase=PAPER_CYCLE` ve en fazla iki paritenin
+  allowlist edilmiş hata kodlarını verir. Payload/URL/özel state veya rastgele
+  exception metni yazılmaz. Eksik neden uydurulmaz; ret başarılı sayılmaz.
+- Önceki head `68a6fc9` gerçek public koşusu `39830584486`: attempt1 3/6,
+  attempt2 4/6; toplam workflow başarısız. Paper safety ilk denemede
+  top-of-book uyuşmazlığıyla reddedildi, bir kez tekrarında geçti. İki karar da
+  risk >3 ve downtrend nedeniyle NO TRADE, 600 nakit/0 rezerv/0 pozisyon;
+  restart/replay/halt geçti. Bağımsız SOL top-of-book ve BTC-TRY stale reddi
+  sürdü. Sürekli veri akışı veya iki açık paper pozisyon kabulü değildir.
+- Son runtime ekranı: Telegram active/running; grid timer'ı ve yaklaşık 15
+  dakikalık başarılı görevler görüldü. Inactive olmuş başarılı görev tek başına
+  arıza değildir. Geçmiş Telegram DNS/502/timeout kayıtları güncel bağlantı
+  veya OKX kök nedeni kanıtı değildir. "OKX TR" adıyla yapılan son 403 testi
+  `www.okx.com`'adır, gerçek TR testi sayılmaz.
+- Önceki public koşu `6908f14` / `39860473305`: 7/8 geçti, workflow başarısız;
+  BTC-TRY `INCOHERENT_FLOW_SNAPSHOTS` açık. BTC/SOL 400/400, tam flow, paper
+  safety ve V7 flow watch geçti. İki canlı paper pozisyon/streaming kabulü değil.
+- TELEGRAM_VERIFIED=false; ACTIVATED=false. Bu çalışmada gerçek bot üzerinde
+  uçtan uca doğrulanan komut **0**. Kısmi kaynak/runtime ekran kanıtı üretim
+  aktivasyonu değildir; tam unit/scheduler sözleşmesi, bağımlılıklar, aktif
+  commit ve state doğrulanmadı.
+- Yeni poller/sender veya üretim servisi değişikliği yok. main merge yok.
+  Private API ve gerçek emirler yok; LIVE_TRADING=false korunur.
+- Ayrıntılı sekiz bölümlü rapor, bağımlılık denetimi, çağrılabilir sınır,
+  staging/rollback ve erişim ihtiyaçları: [V7_INTEGRATION.md](V7_INTEGRATION.md).
+
+Aşağıdaki 20 Ekim kayıtları önceki artımlı teslimlerin tarihçesidir; eski
+`/radar` yönlendirmesi yeni V7 hook'unun GRID radar tanımı yerine kullanılmaz.
+
+---
 
 ## Issue #6 — V6 Smart Money Flow, artımlı teslim 1
 

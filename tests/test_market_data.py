@@ -178,8 +178,9 @@ class CommandHookTests(unittest.TestCase):
     def test_analysis_command_fields_and_no_ledger_trades(self):
         result = self.handle(self.update('/analiz TEST-USDT'))
         self.assertTrue(result['ok'])
-        for text in ('CANLI PİYASA VERİSİ', '400/400', 'Spread', '24h quote', '15m', 'BTC 1H', '0.5pct', 'Top5', 'duvarı', 'KAPALI'):
+        for text in ('DATA_UNVERIFIED', '400/400', 'Spread', '24h quote', '15m', 'BTC 1H', '0.5pct', 'Top5', 'duvarı', 'KAPALI'):
             self.assertIn(text, result['message'])
+        self.assertNotIn('CANLI PİYASA VERİSİ', result['message'])
         self.assertLess(len(result['message']),3500)
         self.assertEqual(self.trader.status()['bots'],[])
         self.assertEqual(result['delivery'],'NOT_SENT')

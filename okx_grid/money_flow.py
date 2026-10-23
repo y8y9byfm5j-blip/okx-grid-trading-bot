@@ -7,10 +7,26 @@ import threading
 from functools import wraps
 
 from .domain import TradingError, canonical, number, positive, precise
-from .flow_contracts import (BARS, FlowPolicy, book_snapshot, candle_indicators, candles,
+from .flow_contracts import (BARS, MAX_HISTORY_PAGES, TRADE_CAPTURE_BUDGET_MS, FlowPolicy, book_snapshot, candle_indicators, candles,
                              discover, fresh, fx_rate, metric, quote_to_usdt, score_flow, spot_symbol, taker_flow)
 from .public_contracts import TR_ORIGIN, _one, _rows, milliseconds
 from .public_http import ReadOnlyTRClient
+
+
+class _IncoherentSnapshots(TradingError):
+    def __init__(self, diagnostics):
+        super().__init__('INCOHERENT_FLOW_SNAPSHOTS')
+        self.diagnostics=diagnostics
+
+
+def _alignment(ticker, at, book, now, attempts):
+    bid,ask=positive(ticker['bidPx']),positive(ticker['askPx'])
+    book_bid,book_ask=number(book['bid']),number(book['ask'])
+    return {'attempts':attempts,'ticker_age_ms':now-at,'book_age_ms':now-book['cursor']['at_ms'],
+            'timestamp_delta_ms':at-book['cursor']['at_ms'],
+            'bid_matches':bid==book_bid,'ask_matches':ask==book_ask,
+            'bid_gap_bps':metric((bid/book_bid-1)*10000),
+            'ask_gap_bps':metric((ask/book_ask-1)*10000)}
 
 
 def serialized(function):
@@ -118,9 +134,12 @@ def aggregate_coins(reports, pairs, ticker_volumes, *, now, previous=None, unive
 
 
 class MoneyFlowScanner:
-    def __init__(self, *, client=None, policy=None, clock_ms=None):
-        self.client=client if client is not None else ReadOnlyTRClient()
+    def __init__(self, *, client=None, policy=None, clock_ms=None, fee_rate="0.001"):
+        self.client=client if client is not None else ReadOnlyTRClient(max_catalog_bytes=8_000_000)
         self.policy=policy if policy is not None else FlowPolicy()
+        self.fee_rate=number(fee_rate)
+        if not 0<=self.fee_rate<=Decimal('.02'):
+            raise TradingError('INVALID_FLOW_FEE')
         self.clock_ms=clock_ms if clock_ms is not None else lambda:time.time_ns()//1000000
         self._lock=threading.RLock()
         self.cursors={}
@@ -129,12 +148,24 @@ class MoneyFlowScanner:
     def _now(self):
         return milliseconds(self.clock_ms())
 
+    @property
+    def real_transport(self):
+        return type(self.client) is ReadOnlyTRClient and self.client._default_transport is True
+
+    @property
+    def data_status(self):
+        return 'VERIFIED_TR_PUBLIC' if self.real_transport else 'DATA_UNVERIFIED'
+
     def _trade_pages(self,instrument,end):
         page=self.client.fetch('trades',instrument)
         pages=[page]
         seen_cursors=set()
-        for _ in range(10):
+        for index in range(MAX_HISTORY_PAGES+1):
+            if not 0<=self._now()-end<=TRADE_CAPTURE_BUDGET_MS:
+                raise TradingError('FLOW_TRADE_CAPTURE_TOO_SLOW')
             rows=_rows(page)
+            if len(rows)>(500 if index==0 else 100):
+                raise TradingError('FLOW_TRADE_PAGE_TOO_LARGE')
             try:
                 oldest=min(milliseconds(r['ts']) for r in rows)
                 cursor=min((r['tradeId'] for r in rows),key=int)
@@ -142,12 +173,33 @@ class MoneyFlowScanner:
                 raise TradingError('INVALID_FLOW_TRADE') from None
             if oldest<=end-300000:
                 return pages
+            if index==MAX_HISTORY_PAGES:
+                break
             if cursor in seen_cursors:
                 raise TradingError('FLOW_PAGINATION_STALLED')
             seen_cursors.add(cursor)
             page=self.client.fetch('history_trades',instrument,after=cursor)
             pages.append(page)
         raise TradingError('INCOMPLETE_FLOW_TRADE_WINDOW')
+
+    def _indicators(self,instrument,start):
+        # Candles are read after pagination, near the current book. A candle
+        # still marked 0 after its boundary stays unusable; re-read once rather
+        # than treating elapsed wall time as exchange confirmation.
+        for attempt in range(2):
+            replies={}
+            for bar in BARS:
+                if not 0<=self._now()-start<=30000:
+                    raise TradingError('FLOW_CAPTURE_TOO_SLOW')
+                replies[bar]=self.client.fetch('flow_candles',instrument,bar=bar)
+            now=self._now()
+            if not 0<=now-start<=30000:
+                raise TradingError('FLOW_CAPTURE_TOO_SLOW')
+            try:
+                return candle_indicators(replies,now)
+            except TradingError as error:
+                if attempt or error.code not in {'FLOW_CANDLE_FINALIZATION_PENDING','MISSING_COMPLETED_FLOW_CANDLE'}:
+                    raise
 
     @serialized
     def reconnect(self,instrument):
@@ -169,31 +221,70 @@ class MoneyFlowScanner:
         try:
             start=self._now()
             metadata=pairs[instrument]
-            replies={bar:self.client.fetch('flow_candles',instrument,bar=bar) for bar in BARS}
             pages=self._trade_pages(instrument,start)
-            ticker=_one(self.client.fetch('flow_ticker',instrument))
-            rawbook=self.client.fetch('flow_books',instrument)
-            now=self._now()
-            if now-start>30000 or now<start:
-                raise TradingError('FLOW_CAPTURE_TOO_SLOW')
-            if ticker['instId']!=instrument or ticker['instType']!='SPOT':
-                raise TradingError('FLOW_INSTRUMENT_MISMATCH')
-            at=fresh(ticker['ts'],now)
-            book=book_snapshot(rawbook,instrument,now,previous=self.cursors.get(instrument),quote=metadata['quote'],fx=fx)
-            if abs(at-book['cursor']['at_ms'])>2000 or positive(ticker['bidPx'])!=number(book['bid']) or positive(ticker['askPx'])!=number(book['ask']):
-                raise TradingError('INCOHERENT_FLOW_SNAPSHOTS')
+            indicators=self._indicators(instrument,start)
+            tickers,books=[],[]
+            for attempt in range(3):
+                ticker=_one(self.client.fetch('flow_ticker',instrument))
+                rawbook=self.client.fetch('flow_books',instrument)
+                now=self._now()
+                if now-start>30000 or now<start:
+                    raise TradingError('FLOW_CAPTURE_TOO_SLOW')
+                if ticker['instId']!=instrument or ticker['instType']!='SPOT':
+                    raise TradingError('FLOW_INSTRUMENT_MISMATCH')
+                at=fresh(ticker['ts'],now)
+                book=book_snapshot(rawbook,instrument,now,previous=self.cursors.get(instrument),quote=metadata['quote'],fx=fx)
+                alignment=_alignment(ticker,at,book,now,attempt+1)
+                tickers.append((ticker,at,attempt+1))
+                books.append((rawbook,book,attempt+1))
+                matched=None
+                # Independent REST caches can interleave observations. Join only
+                # this capture's <=3 tickers/books, preserving exact bid/ask,
+                # <=2s timestamp distance, freshness and the prior book cursor.
+                # No extra GETs, price substitution, tolerance or old-call cache.
+                for candidate_raw,candidate_book,book_index in sorted(books,
+                        key=lambda item:(item[1]['cursor']['sequence'],item[1]['cursor']['at_ms']),reverse=True):
+                    for candidate_ticker,candidate_at,ticker_index in reversed(tickers):
+                        try:
+                            fresh(candidate_at,now)
+                            fresh(candidate_book['cursor']['at_ms'],now)
+                        except TradingError:
+                            continue
+                        candidate=_alignment(candidate_ticker,candidate_at,candidate_book,now,attempt+1)
+                        if (abs(candidate['timestamp_delta_ms'])<=2000 and
+                                candidate['bid_matches'] and candidate['ask_matches']):
+                            matched=(candidate_ticker,candidate_at,candidate_raw,candidate_book,
+                                     {**candidate,'ticker_observation':ticker_index,'book_observation':book_index})
+                            break
+                    if matched:
+                        break
+                if matched:
+                    ticker,at,rawbook,book,alignment=matched
+                    break
+                if attempt==2:
+                    raise _IncoherentSnapshots(alignment)
+                # Independent REST endpoints can move between GETs. Re-read
+                # both, never substitute a book price into the old ticker.
             positive(ticker['last'])
-            indicators=candle_indicators(replies,now)
+            if any(end!=now//BARS[bar]*BARS[bar] for bar,end in indicators['bar_end_ms'].items()):
+                # The ticker/book capture itself crossed a bar boundary. Do
+                # not combine a stale indicator window with the current book.
+                indicators=self._indicators(instrument,start)
+                now=self._now()
+                fresh(at,now)
+                fresh(book['cursor']['at_ms'],now)
             flow=taker_flow(pages,instrument,metadata['quote'],fx,start_ms=start-300000,end_ms=start)
             report={'instrument':instrument,'base':metadata['base'],'quote':metadata['quote'],'source_origin':TR_ORIGIN,
+                    'data_status':self.data_status,
                     'as_of_ms':now,'ticker_ts_ms':at,'flow_window_end_ms':start,
                     'last_price_native':metric(positive(ticker['last'])),
                     'last_price_usdt_estimate':metric(quote_to_usdt(ticker['last'],metadata['quote'],fx,now)),
                     'volume_24h_native_quote':metric(number(ticker['volCcy24h'])),
                     'volume_24h_usdt':metric(quote_to_usdt(ticker['volCcy24h'],metadata['quote'],fx,now)),
                     'fx':fx if metadata['quote']=='TRY' else {'method':'USDT_IDENTITY','rate':'1'},
-                    'indicators':indicators,'flow':flow,'book':book,'rules':metadata,'live_enabled':False}
-            report['execution']=execution_estimate(rawbook,metadata['quote'],fx,now,notional=self.policy.paper_notional)
+                    'indicators':indicators,'flow':flow,'book':book,'rules':metadata,
+                    'capture_alignment':alignment,'live_enabled':False}
+            report['execution']=execution_estimate(rawbook,metadata['quote'],fx,now,notional=self.policy.paper_notional,fee=self.fee_rate)
             report['selection']=score_flow(report,self.policy,btc_return)
             if max(number(report['execution'][k]) for k in ('buy_slippage','sell_slippage'))>self.policy.max_slippage:
                 report['selection']['eligible']=False
@@ -249,11 +340,15 @@ class MoneyFlowScanner:
         if 'BTC-USDT' not in pairs:
             raise TradingError('BTC_REGIME_UNAVAILABLE')
         btc_bar=candles(self.client.fetch('flow_candles','BTC-USDT',bar='1H'),'1H',self._now())[0]
-        btc_return=btc_bar['close']/btc_bar['open']-1
+        # Derived division may repeat; serialize through the bounded metric
+        # contract before score_flow validates it as an input. Raw exchange
+        # price precision remains strictly checked by candles().
+        btc_return=number(metric(btc_bar['close']/btc_bar['open']-1))
         names=sorted(pairs)
         if target is not None:
-            base=pairs[target]['base'] if target in pairs else target
-            names=[name for name in names if pairs[name]['base']==base]
+            # A pair is an exact request; only a bare coin aggregates its quotes.
+            names=([target] if target in pairs else
+                   [name for name in names if pairs[name]['base']==target])
             if not names:
                 raise TradingError('FLOW_SYMBOL_NOT_DISCOVERED')
             if offset:
@@ -265,6 +360,8 @@ class MoneyFlowScanner:
                 reports[name]=self.analyze_pair(name,pairs,fx,btc_return)
             except TradingError as error:
                 reports[name]={'error':error.code}
+                if isinstance(error,_IncoherentSnapshots):
+                    reports[name]['capture_alignment']=error.diagnostics
         now=self._now()
         if now-started>30000:
             raise TradingError('FLOW_BATCH_STALE_USE_SMALLER_BATCH')
@@ -286,7 +383,13 @@ class MoneyFlowScanner:
                     fresh(report['book']['cursor']['at_ms'],now)
                 except TradingError as error:
                     reports[name]={'error':error.code}
-        coins=aggregate_coins(reports,pairs,volume,now=now,previous=previous,universe_hash=universe_hash)
+        if previous is not None and previous.get('universe_hash')!=universe_hash:
+            raise TradingError('INCOMPARABLE_FLOW_ROTATION_BASELINE')
+        # A newly missing/stale denominator must not erase otherwise valid
+        # observed pair data. Shares/rotation remain unavailable and no coin
+        # can rank; the last complete baseline is not replaced by partial data.
+        comparison=previous if len(volume)==len(pairs) else None
+        coins=aggregate_coins(reports,pairs,volume,now=now,previous=comparison,universe_hash=universe_hash)
         # An incomplete turnover denominator cannot produce trustworthy share/rank.
         if len(volume)!=len(pairs):
             for coin in coins:
@@ -294,7 +397,9 @@ class MoneyFlowScanner:
                 coin['reasons'].append('INCOMPLETE_UNIVERSE_VOLUME')
                 coin['volume_share_24h']=None
                 coin['share_change']=None
+        verified = self.real_transport and any('error' not in row for row in reports.values())
         return {'source_origin':TR_ORIGIN,'as_of_ms':now,'server_ts_ms':server,'live_enabled':False,
+                'data_status':'VERIFIED_TR_PUBLIC' if verified else 'DATA_UNVERIFIED',
                 'scope':'DISCOVERED_UNIVERSE_BOUNDED_BATCH_NOT_ALL_MARKET_SIMULTANEOUS',
                 'universe_hash':universe_hash,'discovered_pairs':len(pairs),'excluded_quotes':excluded,
                 'offset':offset,'next_offset':offset+len(batch) if offset+len(batch)<len(names) else None,

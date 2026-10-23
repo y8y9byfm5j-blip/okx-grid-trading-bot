@@ -1,0 +1,66 @@
+name: Isolated OKX TR public acceptance
+on:
+  push:
+    branches: ['codex/v7-unified-paper600']
+    paths:
+      - '.github/workflows/tr-public-probe.yml'
+      - 'okx_grid/**'
+      - 'tools/*smoke.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: tr-public-probe-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  public_probe:
+    name: Public GET ${{ matrix.probe }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    strategy:
+      fail-fast: false
+      matrix:
+        probe: ['v7-btc', 'v7-sol', 'v6-btc', 'v6-btc-usdt', 'v6-sol-usdt', 'v7-paper-safety', 'v7-flow-btc', 'v7-flow-sol', 'v5-observer']
+    env:
+      TRADING_MODE: paper
+      LIVE_TRADING: 'false'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Inspect committed source for private data
+        run: python tools/check_repo_safety.py
+      - name: Explicit public-only acceptance on this isolated runner
+        env:
+          PROBE_KIND: ${{ matrix.probe }}
+        run: |
+          # No VPS/accounts/Telegram/secrets/deploy. Paper safety uses only a temporary ledger.
+          set +e
+          case "$PROBE_KIND" in
+            v7-btc) python tools/v7_smoke.py --allow-public-network --symbol BTC-USDT --include-plan > "$RUNNER_TEMP/tr-public-result.txt" ;;
+            v7-sol) python tools/v7_smoke.py --allow-public-network --symbol SOL-USDT --include-plan > "$RUNNER_TEMP/tr-public-result.txt" ;;
+            v6-btc) python tools/flow_smoke.py --allow-public-network --target BTC --limit 1 > "$RUNNER_TEMP/tr-public-result.txt" ;;
+            v6-btc-usdt) python tools/flow_smoke.py --allow-public-network --target BTC-USDT --limit 1 > "$RUNNER_TEMP/tr-public-result.txt" ;;
+            v6-sol-usdt) python tools/flow_smoke.py --allow-public-network --target SOL-USDT --limit 1 > "$RUNNER_TEMP/tr-public-result.txt" ;;
+            v7-paper-safety) python tools/v7_paper_smoke.py --allow-public-network > "$RUNNER_TEMP/tr-public-result.txt" ;;
+            v7-flow-btc) python tools/flow_smoke.py --allow-public-network --target BTC-USDT --v7-report > "$RUNNER_TEMP/tr-public-result.txt" ;;
+            v7-flow-sol) python tools/flow_smoke.py --allow-public-network --target SOL-USDT --v7-report > "$RUNNER_TEMP/tr-public-result.txt" ;;
+            v5-observer) python tools/v5_observer_smoke.py --allow-public-network --symbol SOL-USDT > "$RUNNER_TEMP/tr-public-result.txt" ;;
+            *) exit 3 ;;
+          esac
+          probe_exit=$?
+          set -e
+          cat "$RUNNER_TEMP/tr-public-result.txt"
+          {
+            echo '## Isolated GitHub runner public GET acceptance'
+            echo 'This is not VPS, Telegram, deployment or trading verification.'
+            echo "Probe: $PROBE_KIND; exit: $probe_exit; LIVE_TRADING=false"
+            echo '```text'
+            cat "$RUNNER_TEMP/tr-public-result.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$probe_exit"

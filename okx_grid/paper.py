@@ -178,21 +178,23 @@ class PaperTrader:
                 raise TradingError("ACCOUNTING_MISMATCH")
             fees += fee
             if fill["side"] == "buy":
-                if quantities[slot] != 0:
-                    raise TradingError("ACCOUNTING_MISMATCH")
                 cost = quantity * price + fee
-                quantities[slot], costs[slot] = quantity, cost
+                quantities[slot] += quantity
+                costs[slot] += cost
                 cash -= cost
             elif fill["side"] == "sell":
-                if quantity != quantities[slot]:
+                if quantity > quantities[slot]:
                     raise TradingError("ACCOUNTING_MISMATCH")
                 net = quantity * price - fee
-                pnl = net - costs[slot]
+                allocated_cost = (costs[slot] if quantity == quantities[slot] else
+                                  (costs[slot] * quantity / quantities[slot]).quantize(Decimal("1e-60")))
+                pnl = net - allocated_cost
                 if pnl != _amount(fill["realized"]):
                     raise TradingError("ACCOUNTING_MISMATCH")
                 realized += pnl
                 cash += net
-                quantities[slot], costs[slot] = Decimal(0), Decimal(0)
+                quantities[slot] -= quantity
+                costs[slot] -= allocated_cost
             else:
                 raise TradingError("ACCOUNTING_MISMATCH")
             if cash < 0:
@@ -281,9 +283,10 @@ class PaperTrader:
             self._audit_all()
         return self.status(bot_id)
 
-    def _fill(self, bot_id, state, plan, slot, side, price, event_id, at):
+    def _fill(self, bot_id, state, plan, slot, side, price, event_id, at, quantity=None):
         position = state["positions"][slot]
-        quantity = plan.quantity(price) if side == "buy" else _amount(position["quantity"])
+        held, held_cost = _amount(position["quantity"]), _amount(position["cost"])
+        quantity = (plan.quantity(price) if side == "buy" else held) if quantity is None else positive(quantity)
         gross, fee = quantity * price, quantity * price * plan.fee_rate
         cash, realized = _amount(state["cash"]), _amount(state["realized"])
         fill = {"slot": slot, "side": side, "price": str(price), "quantity": str(quantity), "fee": str(fee)}
@@ -292,13 +295,16 @@ class PaperTrader:
             if quantity <= 0 or cash < cost:
                 raise TradingError("INSUFFICIENT_PAPER_CASH")
             cash -= cost
-            position.update(quantity=str(quantity), cost=str(cost))
+            position.update(quantity=str(held + quantity), cost=str(held_cost + cost))
         else:
-            pnl = gross - fee - _amount(position["cost"])
+            if quantity > held:
+                raise TradingError("INSUFFICIENT_PAPER_INVENTORY")
+            allocated_cost = held_cost if quantity == held else (held_cost * quantity / held).quantize(Decimal("1e-60"))
+            pnl = gross - fee - allocated_cost
             cash += gross - fee
             realized += pnl
             fill["realized"] = str(pnl)
-            position.update(quantity="0", cost="0")
+            position.update(quantity=str(held - quantity), cost=str(held_cost - allocated_cost))
         state.update(cash=str(cash), realized=str(realized), fees=str(_amount(state["fees"]) + fee))
         self._event(event_id, bot_id, "fill", at, fill)
 

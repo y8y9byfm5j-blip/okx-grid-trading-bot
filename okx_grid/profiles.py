@@ -48,6 +48,6 @@ def load_profile_file(path):
 
 
 def load_profile(name):
-    if name != "v5-paper-500":
+    if name not in {"v5-paper-500", "v7-paper-600"}:
         raise TradingError("UNKNOWN_PAPER_PROFILE")
-    return load_profile_file(Path(__file__).parent / "config" / "v5-paper-500.toml")
+    return load_profile_file(Path(__file__).parent / "config" / (name + ".toml"))

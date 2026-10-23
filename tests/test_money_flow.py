@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from okx_grid.control import notices
 from okx_grid.domain import TradingError
-from okx_grid.flow_contracts import (BARS, FlowPolicy, book_snapshot, candle_indicators, candles, discover,
+from okx_grid.flow_contracts import (BARS, MAX_HISTORY_PAGES, FlowPolicy, book_snapshot, candle_indicators, candles, discover,
                                      fx_rate, quote_to_usdt, score_flow, taker_flow)
 from okx_grid.flow_replay import replay_roundtrip
 from okx_grid.money_flow import MoneyFlowScanner, aggregate_coins
@@ -229,6 +229,141 @@ class FlowContracts(unittest.TestCase):
 
 
 class FlowScannerTests(unittest.TestCase):
+    def cached_api(self,ticker_steps,book_steps):
+        api=FakeFlowAPI()
+        original=api.fetch
+        counts={'flow_ticker':0,'flow_books':0}
+        def fetch(kind,instrument=None,**kwargs):
+            result=original(kind,instrument,**kwargs)
+            if kind in counts:
+                steps=ticker_steps if kind=='flow_ticker' else book_steps
+                values=steps[min(counts[kind],len(steps)-1)]
+                counts[kind]+=1
+                bid,ask,at=values[:3]
+                if kind=='flow_ticker':
+                    result['data'][0].update(bidPx=bid,askPx=ask,ts=str(at))
+                else:
+                    result['data'][0]['bids'][0][0]=bid
+                    result['data'][0]['asks'][0][0]=ask
+                    result['data'][0].update(ts=str(at),seqId=values[3])
+            return result
+        api.fetch=fetch
+        return api,counts
+
+    def test_interleaved_rest_cache_matches_later_ticker_to_earlier_real_book(self):
+        api,counts=self.cached_api([('99.98','100.02',NOW-200),('99.99','100.01',NOW-100)],
+            [('99.99','100.01',NOW-100,10),('100','100.02',NOW-50,11)])
+        report=scanner(api).scan_batch(target='TEST-USDT')['pairs']['TEST-USDT']
+        self.assertNotIn('error',report)
+        self.assertEqual(report['capture_alignment']['ticker_observation'],2)
+        self.assertEqual(report['capture_alignment']['book_observation'],1)
+        self.assertEqual(report['book']['cursor']['sequence'],10)
+        self.assertEqual(report['book']['bid'],'99.99')
+        self.assertEqual(report['ticker_ts_ms'],NOW-100)
+        self.assertEqual(counts,{'flow_ticker':2,'flow_books':2})
+
+    def test_interleaved_rest_cache_matches_earlier_ticker_to_newer_real_book(self):
+        api,counts=self.cached_api([('99.99','100.01',NOW-100),('100','100.02',NOW-50)],
+            [('99.98','100.02',NOW-100,10),('99.99','100.01',NOW-100,11)])
+        report=scanner(api).scan_batch(target='TEST-USDT')['pairs']['TEST-USDT']
+        self.assertNotIn('error',report)
+        self.assertEqual(report['capture_alignment']['ticker_observation'],1)
+        self.assertEqual(report['capture_alignment']['book_observation'],2)
+        self.assertEqual(report['book']['cursor']['sequence'],11)
+        self.assertEqual(counts,{'flow_ticker':2,'flow_books':2})
+
+    def test_exact_quotes_outside_existing_two_second_limit_remain_rejected(self):
+        api,counts=self.cached_api([('99.99','100.01',NOW-3000)],[('99.99','100.01',NOW-999,10)])
+        flow=scanner(api)
+        result=flow.scan_batch(target='TEST-USDT')['pairs']['TEST-USDT']
+        self.assertEqual(result['error'],'INCOHERENT_FLOW_SNAPSHOTS')
+        self.assertEqual(result['capture_alignment']['timestamp_delta_ms'],-2001)
+        self.assertTrue(result['capture_alignment']['bid_matches'])
+        self.assertEqual(counts,{'flow_ticker':3,'flow_books':3})
+        self.assertNotIn('TEST-USDT',flow.cursors)
+
+    def test_later_structural_book_fault_is_not_hidden_by_a_prior_observation(self):
+        api,_=self.cached_api([('99.98','100.02',NOW-100),('99.99','100.01',NOW-100)],
+            [('99.99','100.01',NOW-100,10)])
+        original=api.fetch
+        books=0
+        def fetch(kind,instrument=None,**kwargs):
+            nonlocal books
+            result=original(kind,instrument,**kwargs)
+            if kind=='flow_books':
+                books+=1
+                if books==2:
+                    result['data'][0]['asks']=[]
+            return result
+        api.fetch=fetch
+        flow=scanner(api)
+        self.assertEqual(flow.scan_batch(target='TEST-USDT')['pairs']['TEST-USDT'],{'error':'INVALID_FLOW_BOOK'})
+        self.assertNotIn('TEST-USDT',flow.cursors)
+
+    def test_alignment_observations_never_carry_over_between_capture_calls(self):
+        api,_=self.cached_api([('99.98','100.02',NOW-100)]*3+[('99.99','100.01',NOW-100)]*3,
+            [('99.99','100.01',NOW-100,10)]*3+[('99.97','100.03',NOW-100,11)]*3)
+        flow=scanner(api)
+        for _ in range(2):
+            self.assertEqual(flow.scan_batch(target='TEST-USDT')['pairs']['TEST-USDT']['error'],
+                             'INCOHERENT_FLOW_SNAPSHOTS')
+        self.assertEqual(flow.cursors,{})
+
+    def test_smoke_exposes_bounded_alignment_diagnostics_without_turning_failure_green(self):
+        from tools.flow_smoke import main
+        api,_=self.cached_api([('99.98','100.02',NOW-100)],[('99.99','100.01',NOW-100,10)])
+        with patch('tools.flow_smoke.MoneyFlowScanner',return_value=scanner(api)),patch('sys.stdout',io.StringIO()) as output:
+            self.assertEqual(main(['--allow-public-network','--target','TEST-USDT']),2)
+        import json
+        result=json.loads(output.getvalue())
+        self.assertFalse(result['ok'])
+        diagnostics=result['pair_status']['TEST-USDT']['capture_alignment']
+        self.assertEqual(diagnostics['attempts'],3)
+        self.assertFalse(diagnostics['bid_matches'])
+        self.assertNotIn('bidPx',str(diagnostics))
+        self.assertLess(len(str(diagnostics)),500)
+
+    def test_rest_top_mismatch_recaptures_both_and_keeps_same_strict_gate(self):
+        for permanent in (False,True):
+            api=FakeFlowAPI()
+            original=api.fetch
+            calls=0
+            def fetch(kind,instrument=None,**kwargs):
+                nonlocal calls
+                result=original(kind,instrument,**kwargs)
+                if kind=='flow_ticker':
+                    calls+=1
+                    if permanent or calls==1:
+                        result['data'][0]['bidPx']='99.98'
+                return result
+            api.fetch=fetch
+            flow=scanner(api)
+            result=flow.scan_batch(target='TEST-USDT')['pairs']['TEST-USDT']
+            if permanent:
+                self.assertEqual(result['error'],'INCOHERENT_FLOW_SNAPSHOTS')
+                self.assertFalse(result['capture_alignment']['bid_matches'])
+                self.assertEqual(result['capture_alignment']['attempts'],3)
+                self.assertNotIn('TEST-USDT',flow.cursors)
+                expected=3
+            else:
+                self.assertNotIn('error',result)
+                expected=2
+            self.assertEqual(calls,expected)
+            self.assertEqual(sum(c[0]=='flow_books' for c in api.calls),expected)
+
+    def test_nonterminating_btc_regime_return_is_a_metric_not_raw_input(self):
+        api=FakeFlowAPI()
+        original=api.fetch
+        def fetch(kind,instrument=None,**kwargs):
+            result=original(kind,instrument,**kwargs)
+            if kind=='flow_candles' and instrument=='BTC-USDT' and kwargs.get('bar')=='1H':
+                for row in result['data']:
+                    row[1]='100.03'
+            return result
+        api.fetch=fetch
+        result=scanner(api).scan_batch(target='TEST-USDT')
+        self.assertNotIn('error',result['pairs']['TEST-USDT'])
+
     def test_scan_top_rank_has_breakdown_without_any_live_permission(self):
         result=scanner().scan_batch()
         self.assertEqual(result['discovered_pairs'],2)
@@ -256,6 +391,15 @@ class FlowScannerTests(unittest.TestCase):
         self.assertEqual(coin['cvd_quote_usdt'],'1600')
         self.assertTrue(coin['coverage_complete'])
         self.assertEqual(coin['leader']['volume_24h_usdt'],'20000000')
+
+    def test_explicit_pair_does_not_expand_to_other_quote(self):
+        api=FakeFlowAPI(('BTC-USDT','TEST-USDT','TEST-TRY','USDT-TRY'))
+        result=scanner(api).scan_batch(target='TEST-USDT')
+        self.assertEqual(result['batch_pairs'],['TEST-USDT'])
+        self.assertFalse(any(call[1]=='TEST-TRY' for call in api.calls))
+        # Missing exact quote must never fall back to another pair.
+        with self.assertRaisesRegex(TradingError,'FLOW_SYMBOL_NOT_DISCOVERED'):
+            scanner(api).scan_batch(target='TEST-USDC')
         self.assertNotIn('USDT',[c['coin'] for c in result['coins']])
 
     def test_partial_coin_pair_coverage_cannot_rank(self):
@@ -276,6 +420,111 @@ class FlowScannerTests(unittest.TestCase):
         result=scanner(api).scan_batch(target='TEST')
         self.assertTrue(any(c[0]=='history_trades' and c[3]=='29' for c in api.calls))
         self.assertEqual(result['pairs']['TEST-USDT']['flow']['cvd_quote_usdt'],'800')
+
+    def test_last_allowed_history_page_is_validated_before_exhaustion(self):
+        for boundary in (10,MAX_HISTORY_PAGES):
+            api=FakeFlowAPI()
+            original=api.fetch
+            count=0
+            def fetch(kind,instrument=None,**kwargs):
+                nonlocal count
+                if kind in {'trades','history_trades'}:
+                    if kind=='history_trades':
+                        count+=1
+                    return envelope({'instId':instrument,'tradeId':str(1000-count),'side':'buy',
+                        'px':'100','sz':'1','ts':str(NOW-(300001 if count==boundary else 1000+count*1000))})
+                return original(kind,instrument,**kwargs)
+            api.fetch=fetch
+            pages=scanner(api)._trade_pages('TEST-USDT',NOW)
+            self.assertEqual(len(pages),boundary+1)
+            self.assertEqual(count,boundary)
+            flow=taker_flow(pages,'TEST-USDT','USDT',None,start_ms=NOW-300000,end_ms=NOW)
+            self.assertEqual(flow['unique_trades'],boundary+1)
+
+    def test_trade_capture_deadline_stops_before_page_budget(self):
+        at=NOW
+        calls=0
+        class SlowAPI:
+            def fetch(self,kind,instrument,**kwargs):
+                nonlocal at,calls
+                at+=1000
+                calls+=1
+                return envelope({'instId':instrument,'tradeId':str(1000-calls),'side':'buy',
+                                 'px':'100','sz':'1','ts':str(NOW-1000)})
+        flow=MoneyFlowScanner(client=SlowAPI(),clock_ms=lambda:at)
+        with self.assertRaisesRegex(TradingError,'FLOW_TRADE_CAPTURE_TOO_SLOW'):
+            flow._trade_pages('TEST-USDT',NOW)
+        self.assertEqual(calls,16)
+        self.assertLess(calls,MAX_HISTORY_PAGES)
+
+    def test_candle_finalization_rereads_once_without_promoting_incomplete_bar(self):
+        for permanent in (False,True):
+            api=FakeFlowAPI()
+            original=api.fetch
+            count=0
+            def fetch(kind,instrument=None,**kwargs):
+                nonlocal count
+                result=original(kind,instrument,**kwargs)
+                if kind=='flow_candles' and kwargs.get('bar')=='5m':
+                    count+=1
+                    if permanent or count==1:
+                        result['data'][1][8]='0'
+                return result
+            api.fetch=fetch
+            result=scanner(api).scan_batch(target='TEST-USDT')['pairs']['TEST-USDT']
+            self.assertEqual(count,2)
+            if permanent:
+                self.assertEqual(result,{'error':'FLOW_CANDLE_FINALIZATION_PENDING'})
+            else:
+                self.assertEqual(result['indicators']['rvol_5m'],'4')
+                self.assertNotIn('error',result)
+            pair_calls=[c[0] for c in api.calls if c[1]=='TEST-USDT']
+            self.assertLess(pair_calls.index('trades'),pair_calls.index('flow_candles'))
+
+    def test_future_confirmed_candle_is_not_retried_as_finalization_lag(self):
+        api=FakeFlowAPI()
+        original=api.fetch
+        def fetch(kind,instrument=None,**kwargs):
+            result=original(kind,instrument,**kwargs)
+            if kind=='flow_candles' and instrument=='TEST-USDT' and kwargs.get('bar')=='1m':
+                result['data'][0][8]='1'
+            return result
+        api.fetch=fetch
+        result=scanner(api).scan_batch(target='TEST-USDT')['pairs']['TEST-USDT']
+        self.assertEqual(result,{'error':'INVALID_FLOW_CANDLE_CONFIRM'})
+        self.assertEqual(sum(c[0]=='flow_candles' and c[1]=='TEST-USDT' and c[2]=='1m' for c in api.calls),1)
+
+    def test_book_capture_crossing_minute_rechecks_indicator_window(self):
+        api=FakeFlowAPI()
+        original=api.fetch
+        at=NOW+40000  # Synthetic start: 52 seconds into a minute.
+        books=0
+        def fetch(kind,instrument=None,**kwargs):
+            nonlocal at,books
+            result=original(kind,instrument,**kwargs)
+            if kind=='flow_books':
+                books+=1
+                if books==1:
+                    at+=10000  # Now 2 seconds into the next minute.
+                result['data'][0]['ts']=str(at)
+            elif kind=='flow_ticker':
+                result['data'][0]['ts']=str(at)
+            elif kind=='flow_candles':
+                period=BARS[kwargs['bar']]
+                shift=at//period*period-NOW//period*period
+                for row in result['data']:
+                    row[0]=str(int(row[0])+shift)
+            elif kind in {'trades','history_trades'}:
+                for row in result['data']:
+                    row['ts']=str(int(row['ts'])+40000)
+            return result
+        api.fetch=fetch
+        pairs,_=discover(api.fetch('instruments'))
+        flow=MoneyFlowScanner(client=api,clock_ms=lambda:at)
+        result=flow.analyze_pair('TEST-USDT',pairs,None,Decimal('0'))
+        self.assertEqual(result['indicators']['bar_end_ms']['1m'],at//60000*60000)
+        self.assertEqual(sum(c[0]=='flow_candles' and c[2]=='1m' for c in api.calls),2)
+        self.assertEqual(result['flow_window_end_ms'],NOW+40000)
 
     def test_pagination_stall_blocks_instead_of_fabricating_cvd(self):
         api=FakeFlowAPI();api.recent_boundary=False;api.history_stalled=True
@@ -500,7 +749,7 @@ class FlowEdgeAndIntegrationTests(unittest.TestCase):
     def test_trade_pagination_limit_fails_closed(self):
         api=FakeFlowAPI();api.recent_boundary=False
         original=api.fetch
-        counter=[28]
+        counter=[1000]
         def fetch(kind,instrument=None,**kwargs):
             reply=original(kind,instrument,**kwargs)
             if kind=='history_trades':
@@ -510,7 +759,7 @@ class FlowEdgeAndIntegrationTests(unittest.TestCase):
         api.fetch=fetch
         result=scanner(api).scan_batch(target='TEST')
         self.assertEqual(result['pairs']['TEST-USDT']['error'],'INCOMPLETE_FLOW_TRADE_WINDOW')
-        self.assertEqual(sum(c[0]=='history_trades' for c in api.calls),10)
+        self.assertEqual(sum(c[0]=='history_trades' for c in api.calls),MAX_HISTORY_PAGES)
 
     def test_stale_clock_or_ticker_no_rank(self):
         api=FakeFlowAPI()
@@ -587,6 +836,17 @@ class FlowEdgeAndIntegrationTests(unittest.TestCase):
 
 
 class FlowSmokeTests(unittest.TestCase):
+    def test_all_rejected_pairs_emit_false_ok_and_nonzero_exit(self):
+        from tools.flow_smoke import main
+        import json
+        api=FakeFlowAPI()
+        api.fail='flow_books'
+        output=io.StringIO()
+        with patch('tools.flow_smoke.MoneyFlowScanner',return_value=scanner(api)),patch('sys.stdout',output):
+            result=main(['--allow-public-network','--target','TEST-USDT'])
+        self.assertEqual(result,2)
+        self.assertFalse(json.loads(output.getvalue())['ok'])
+
     def test_network_flag_required_before_fetch(self):
         from tools.flow_smoke import main
         with patch('sys.stderr',io.StringIO()),patch('socket.create_connection',side_effect=AssertionError('no network')):

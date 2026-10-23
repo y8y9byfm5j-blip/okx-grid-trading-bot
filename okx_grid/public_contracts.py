@@ -19,11 +19,17 @@ PUBLIC_PATHS = {
     "books": "/api/v5/market/books",
     "candles": "/api/v5/market/candles",
 }
-PERIODS = {"15m": 900000, "1H": 3600000}
+PERIODS = {"15m": 900000, "1H": 3600000, "4H": 14400000}
 
 
 def request_spec(kind, instrument=None, *, bar=None):
     """Return only an allowlisted GET contract. Never sign, send, or accept URLs."""
+    if kind == "grid_candles":
+        instrument = symbol(instrument)
+        if bar not in PERIODS:
+            raise TradingError("UNSUPPORTED_BAR")
+        return {"method": "GET", "origin": TR_ORIGIN, "path": PUBLIC_PATHS["candles"],
+                "params": {"instId": instrument, "bar": bar, "limit": "22"}}
     if kind in {"flow_candles", "trades", "history_trades", "flow_books", "flow_ticker"}:
         from .flow_contracts import BARS, spot_symbol
         instrument = spot_symbol(instrument)
@@ -97,6 +103,26 @@ def _fresh(at, now, policy):
         raise TradingError("STALE_PUBLIC_DATA")
     if at - now > policy.max_future_seconds * 1000:
         raise TradingError("FUTURE_PUBLIC_DATA")
+
+
+def check_snapshot_freshness(report, *, now_ms, policy):
+    """Recheck source clocks and completed bars at the point of use.
+
+    Analysis completion does not refresh an old ticker/book or a candle window.
+    This validates time contracts only; transport provenance is checked separately.
+    """
+    now_ms = milliseconds(now_ms)
+    try:
+        times = {k: milliseconds(report[k]) for k in ("as_of_ms", "ticker_ts_ms", "book_ts_ms")}
+        for at in times.values():
+            _fresh(at, now_ms, policy)
+        if abs(times["ticker_ts_ms"] - times["book_ts_ms"]) > 2000:
+            raise TradingError("INCOHERENT_PUBLIC_SNAPSHOTS")
+        for bar, period in PERIODS.items():
+            if milliseconds(report["completed_bar_end_ms"][bar]) != now_ms // period * period:
+                raise TradingError("STALE_TREND_WINDOW")
+    except (KeyError, TypeError):
+        raise TradingError("INVALID_PUBLIC_DATA") from None
 
 
 def _rows(reply):
@@ -177,6 +203,8 @@ def normalize_market(instrument, instruments_reply, ticker_reply, books_reply, *
                     raise TradingError("INVALID_ORDER_BOOK")
             return [[r[0], r[1]] for r in rows]
         bids, asks = levels("bids"), levels("asks")
+        if positive(bids[0][0]) != positive(ticker["bidPx"]) or positive(asks[0][0]) != positive(ticker["askPx"]):
+            raise TradingError("INCOHERENT_PUBLIC_TOP_OF_BOOK")
         market = Market.from_dict({"instrument": instrument, "price": ticker["last"],
                                    "bid": ticker["bidPx"], "ask": ticker["askPx"],
                                    "quote_volume_24h": ticker["volCcy24h"],

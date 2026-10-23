@@ -138,6 +138,12 @@ class RestMarketContracts(unittest.TestCase):
             with self.subTest(update=update), self.assertRaises(TradingError):
                 self.normalize(replies)
 
+    def test_top_of_book_mismatch_is_diagnostic_and_still_rejected(self):
+        replies = public_fixture()
+        replies[1]['data'][0]['bidPx'] = '99.98'
+        with self.assertRaisesRegex(TradingError, 'INCOHERENT_PUBLIC_TOP_OF_BOOK'):
+            self.normalize(replies)
+
     def test_sequence_duplicate_conflict_regression_and_snapshot_gap(self):
         first = self.normalize()
         self.assertTrue(self.normalize(previous=first.cursor).duplicate_book)

@@ -11,6 +11,7 @@ from .public_http import ReadOnlyTRClient
 from .radar import screen
 
 LABEL = "CANLI PİYASA VERİSİ — SANAL İŞLEM (PAPER)"
+UNVERIFIED_LABEL = "DOĞRULANMAMIŞ VERİ — SANAL TEST (PAPER)"
 
 
 def market_dict(market):
@@ -51,14 +52,26 @@ class TRMarketData:
     """
     def __init__(self, policy, *, client=None, clock_ms=None):
         self.policy = policy
-        self.client = client if client is not None else ReadOnlyTRClient()
+        self.client = client if client is not None else ReadOnlyTRClient(max_catalog_bytes=8_000_000)
         self.clock_ms = clock_ms if clock_ms is not None else lambda: time.time_ns() // 1_000_000
         self.cursors = {}
-        self.last_health = {"ok": False, "reason": "NOT_CHECKED", "live_enabled": False}
+        self.last_health = {"ok": False, "data_status": "DATA_UNVERIFIED", "reason": "NOT_CHECKED", "live_enabled": False}
         self._lock = threading.RLock()
 
     def _now(self):
         return milliseconds(self.clock_ms())
+
+    @property
+    def real_transport(self):
+        return type(self.client) is ReadOnlyTRClient and self.client._default_transport is True
+
+    @property
+    def data_status(self):
+        return "VERIFIED_TR_PUBLIC" if self.real_transport else "DATA_UNVERIFIED"
+
+    @property
+    def label(self):
+        return (LABEL if self.real_transport else UNVERIFIED_LABEL) + " | " + self.data_status
 
     def analyze(self, instrument):
         instrument = symbol(instrument)
@@ -66,13 +79,13 @@ class TRMarketData:
             try:
                 result = self._analyze(instrument)
                 self.last_health = {"ok": True, "instrument": instrument, "book_ts_ms": result["book_ts_ms"],
-                                    "checked_at_ms": result["as_of_ms"], "live_enabled": False}
+                                    "checked_at_ms": result["as_of_ms"], "data_status": self.data_status, "live_enabled": False}
                 return result
             except TradingError as error:
-                self.last_health = {"ok": False, "reason": error.code, "checked_at_ms": self._now(), "live_enabled": False}
+                self.last_health = {"ok": False, "data_status": "DATA_UNVERIFIED", "reason": error.code, "checked_at_ms": self._now(), "live_enabled": False}
                 raise
             except (KeyError, TypeError, ValueError, OverflowError):
-                self.last_health = {"ok": False, "reason": "INVALID_PUBLIC_DATA", "checked_at_ms": self._now(), "live_enabled": False}
+                self.last_health = {"ok": False, "data_status": "DATA_UNVERIFIED", "reason": "INVALID_PUBLIC_DATA", "checked_at_ms": self._now(), "live_enabled": False}
                 raise TradingError("INVALID_PUBLIC_DATA") from None
 
     def _analyze(self, instrument):
@@ -112,7 +125,8 @@ class TRMarketData:
         if short.value > Decimal("0.05"):
             reasons.append("EXCESSIVE_SHORT_MOMENTUM")
         self.cursors[instrument] = capture.cursor
-        return {"label": LABEL, "source_origin": TR_ORIGIN, "transport": "REST_SNAPSHOT", "live_enabled": False,
+        return {"label": self.label, "data_status": self.data_status,
+                "source_origin": TR_ORIGIN, "transport": "REST_SNAPSHOT", "live_enabled": False,
                 "as_of_ms": now, "server_ts_ms": server, "ticker_ts_ms": milliseconds(_one(ticker)["ts"]),
                 "book_ts_ms": capture.cursor.at_ms, "book_age_ms": now - capture.cursor.at_ms,
                 "sequence": capture.cursor.sequence, "duplicate_book": capture.duplicate_book,
@@ -134,8 +148,9 @@ class TRMarketData:
             try:
                 tickers = _rows(self.client.fetch("tickers"))
             except TradingError as error:
-                self.last_health = {"ok": False, "reason": error.code, "checked_at_ms": self._now(), "live_enabled": False}
-                return {"label": LABEL, "live_enabled": False, "scope": "CONFIGURED_UNIVERSE", "as_of_ms": self._now(),
+                self.last_health = {"ok": False, "data_status": "DATA_UNVERIFIED", "reason": error.code, "checked_at_ms": self._now(), "live_enabled": False}
+                return {"label": UNVERIFIED_LABEL + " | DATA_UNVERIFIED", "data_status": "DATA_UNVERIFIED",
+                        "live_enabled": False, "scope": "CONFIGURED_UNIVERSE", "as_of_ms": self._now(),
                         "accepted": [], "rejected": [{"instrument": s, "reasons": [error.code]} for s in instruments]}
             for instrument in instruments:
                 try:
@@ -168,7 +183,8 @@ class TRMarketData:
                     rejected.append({"instrument": report["market"]["instrument"], "reasons": ["STALE_PUBLIC_DATA"]})
                 else:
                     fresh.append(report)
-            return {"label": LABEL, "live_enabled": False, "scope": "CONFIGURED_UNIVERSE", "as_of_ms": now,
+            return {"label": self.label, "data_status": self.data_status,
+                    "live_enabled": False, "scope": "CONFIGURED_UNIVERSE", "as_of_ms": now,
                     "accepted": fresh, "rejected": rejected}
 
     def grid(self, template):
@@ -190,7 +206,8 @@ class TRMarketData:
                     (buy * (1 + plan.fee_rate) * (1 + plan.slippage_rate)) - 1)) for buy, sell in zip(plan.levels, plan.levels[1:])]
         if any(Decimal(r) <= 0 for r in net):
             raise TradingError("GRID_NOT_PROFITABLE_AFTER_SLIPPAGE")
-        return {"label": LABEL, "live_enabled": False, "action": "PROPOSAL_ONLY_NO_RESERVATION", "analysis": report,
+        return {"label": report["label"], "data_status": report["data_status"],
+                "live_enabled": False, "action": "PROPOSAL_ONLY_NO_RESERVATION", "analysis": report,
                 "plan": plan.to_dict(), "arithmetic_levels": [str(p) for p in plan.levels], "planned_loss_usdt": str(plan.planned_loss),
                 "net_grid_returns": net, "fee_assumption": "Caller supplied; no authenticated fee lookup",
                 "bot_risk_cap_usdt": str(self.policy.equity * self.policy.risk_fraction),

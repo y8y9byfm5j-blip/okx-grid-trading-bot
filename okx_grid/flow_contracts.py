@@ -18,6 +18,8 @@ def metric(value):
 
 
 BARS = {"1m":60000, "5m":300000, "15m":900000, "1H":3600000}
+MAX_HISTORY_PAGES = 40  # 500 recent + at most 40 x 100 historical trades.
+TRADE_CAPTURE_BUDGET_MS = 15000
 
 
 def spot_symbol(value):
@@ -107,8 +109,10 @@ def candles(reply, bar, now):
         opening,high,low,close=map(positive,row[1:5])
         if low>min(opening,close) or high<max(opening,close) or high<low or any(number(v)<0 for v in row[5:8]):
             raise TradingError('INVALID_FLOW_CANDLE')
-        if not isinstance(row[8], str) or row[8] not in {'0','1'} or (row[8]=='1')!=(at+period<=now):
+        if not isinstance(row[8], str) or row[8] not in {'0','1'} or row[8]=='1' and at+period>now:
             raise TradingError('INVALID_FLOW_CANDLE_CONFIRM')
+        if row[8]=='0' and at+period<=now:
+            raise TradingError('FLOW_CANDLE_FINALIZATION_PENDING')
         if row[8]=='1':
             complete.append({'at_ms':at,'open':opening,'close':close,'quote_volume':number(row[7])})
     if not complete or complete[0]['at_ms']!=now//period*period-period:
@@ -143,7 +147,7 @@ def taker_flow(pages, instrument, quote, fx, *, start_ms, end_ms):
     spot_symbol(instrument)
     if instrument.rsplit('-',1)[1]!=quote:
         raise TradingError('FLOW_QUOTE_MISMATCH')
-    if not isinstance(pages,list) or not 1<=len(pages)<=11 or end_ms-start_ms!=300000:
+    if not isinstance(pages,list) or not 1<=len(pages)<=MAX_HISTORY_PAGES+1 or end_ms-start_ms!=300000:
         raise TradingError('INVALID_FLOW_TRADE_WINDOW')
     seen, boundary, latest = {}, False, None
     buy=sell=base_delta=Decimal(0)

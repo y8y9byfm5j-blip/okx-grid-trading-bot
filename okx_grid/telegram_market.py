@@ -8,7 +8,7 @@ import json
 from .automation import _paper_500_only
 from .control import pin, receipt, record, snapshot
 from .domain import TradingError, build_plan, paper_only, symbol
-from .market_data import LABEL
+from .market_data import UNVERIFIED_LABEL
 from .telegram_control import handle_update
 
 
@@ -20,7 +20,7 @@ def render(result):
     if command.startswith("/analiz") or command == "/grid":
         report = value["analysis"] if command == "/grid" else value
         market, book = report["market"], report["book"]
-        lines = [LABEL, "Kaynak: https://tr.okx.com | anlık REST snapshot", f"{market['instrument']} | as-of ms: {report['as_of_ms']}",
+        lines = [report.get("label", UNVERIFIED_LABEL + " | DATA_UNVERIFIED"), "Kaynak: https://tr.okx.com | anlık REST snapshot", f"{market['instrument']} | as-of ms: {report['as_of_ms']}",
                  f"Fiyat {market['price']} | Bid {market['bid']} / Ask {market['ask']} | Spread {report['spread_bps']} bps",
                  f"24h quote hacmi {market['quote_volume_24h']} USDT",
                  f"15m {report['trend']['return_15m']} | 1H {report['trend']['return_1h']} | BTC 1H {report['trend']['btc_return_1h']} (oran)",
@@ -44,7 +44,7 @@ def render(result):
         lines.extend(["Duvarlar iptal edilebilir; fiyat hedefi değildir. Derinlik dönen seviyelerle sınırlı.", "Gerçek para emirleri: KAPALI"])
         text = "\n".join(lines)
     elif command == "/radar":
-        lines = [LABEL, "TR anlık REST snapshot | yapılandırılmış parite listesi"]
+        lines = [value.get("label", UNVERIFIED_LABEL + " | DATA_UNVERIFIED"), "TR anlık REST snapshot | yapılandırılmış parite listesi"]
         lines.extend("KABUL " + r["market"]["instrument"] + " | spread " + r["spread_bps"] + " bps" for r in value["accepted"])
         lines.extend("RET " + r["instrument"] + " | " + ",".join(r["reasons"]) for r in value["rejected"])
         text = "\n".join(lines + ["Gerçek para emirleri: KAPALI"])

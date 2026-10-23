@@ -147,8 +147,11 @@ class ControlTests(unittest.TestCase):
             self.handle(self.update(uid=1), now=1001)
 
     def test_telegram_rejects_live_free_text_and_edited_update(self):
-        for command in ("/buy TEST-USDT", "/paper live", "/paper resume", "/durum@otherbot", "sell all"):
-            with self.subTest(command=command), self.assertRaisesRegex(TradingError, "TELEGRAM_COMMAND_REJECTED"):
+        commands = {"/buy TEST-USDT": "UNKNOWN_COMMAND", "/paper live": "COMMAND_ARGUMENTS_REQUIRED",
+                    "/paper resume": "COMMAND_ARGUMENTS_REQUIRED", "/durum@otherbot": "UNKNOWN_COMMAND",
+                    "sell all": "TELEGRAM_COMMAND_REJECTED"}
+        for command, reason in commands.items():
+            with self.subTest(command=command), self.assertRaisesRegex(TradingError, reason):
                 self.handle(self.update(command))
         with self.assertRaisesRegex(TradingError, "TELEGRAM_UPDATE_REJECTED"):
             self.handle({"update_id": 1, "edited_message": self.update()["message"]})

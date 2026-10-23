@@ -53,7 +53,7 @@ def identifier(value):
 
 
 def symbol(value):
-    if not isinstance(value, str) or not re.fullmatch(r"[A-Z0-9]{2,20}-USDT", value):
+    if not isinstance(value, str) or not re.fullmatch(r"[A-Z0-9]{1,24}-USDT", value):
         raise TradingError("INVALID_SPOT_SYMBOL")
     return value
 
@@ -184,9 +184,11 @@ class RiskPolicy:
             raise TradingError("WIDE_SPREAD")
         if abs(market.price / ((market.bid + market.ask) / 2) - 1) > Decimal("0.01"):
             raise TradingError("PRICE_BOOK_DIVERGENCE")
-        # Only count displayed liquidity within 0.5% of the touch, on both sides.
-        bid_depth = sum((p * q for p, q in market.bids if p >= market.bid * Decimal("0.995")), Decimal(0))
-        ask_depth = sum((p * q for p, q in market.asks if p <= market.ask * Decimal("1.005")), Decimal(0))
+        # Match the reported +/-0.5% band around the same midpoint. Measuring
+        # from each touch includes extra, unreported liquidity across the spread.
+        mid = (market.bid + market.ask) / 2
+        bid_depth = sum((p * q for p, q in market.bids if p >= mid * Decimal("0.995")), Decimal(0))
+        ask_depth = sum((p * q for p, q in market.asks if p <= mid * Decimal("1.005")), Decimal(0))
         if min(bid_depth, ask_depth) < capital * self.min_depth_multiple:
             raise TradingError("INSUFFICIENT_DEPTH")
 
@@ -243,6 +245,13 @@ class GridPlan:
 
     @property
     @precise
+    def net_grid_returns(self):
+        return tuple(sell * (1 - self.fee_rate) * (1 - self.slippage_rate) /
+                     (buy * (1 + self.fee_rate) * (1 + self.slippage_rate)) - 1
+                     for buy, sell in zip(self.levels, self.levels[1:]))
+
+    @property
+    @precise
     def planned_loss(self):
         # Conservative full-capital entry at the top; this is a scenario, not a guaranteed maximum.
         entry_cost = self.upper * (1 + self.slippage_rate) * (1 + self.fee_rate)
@@ -265,6 +274,8 @@ class GridPlan:
             raise TradingError("BOT_CAPITAL_LIMIT")
         if self.planned_loss > policy.equity * policy.risk_fraction:
             raise TradingError("BOT_RISK_LIMIT")
+        if min(self.net_grid_returns) <= 0:
+            raise TradingError("GRID_NOT_PROFITABLE_AFTER_SLIPPAGE")
 
 
 def build_plan(data):

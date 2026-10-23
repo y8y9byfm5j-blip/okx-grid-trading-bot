@@ -120,6 +120,53 @@ class SafePublicTransport(unittest.TestCase):
         with patch("urllib.request.urlopen", side_effect=AssertionError("network forbidden")):
             ReadOnlyTRClient()
 
+    def test_html_time_response_is_rejected_with_content_free_diagnostics(self):
+        response=FakeResponse(b'<html><body>PRIVATE_VALUE_MUST_NOT_BE_RECORDED</body></html>')
+        response.headers={'Content-Type':'text/html; charset=utf-8','Content-Length':'70','Set-Cookie':'DO_NOT_RECORD'}
+        client=make_client(opener=FakeOpener(response))
+        with self.assertRaisesRegex(TradingError,'PUBLIC_NON_JSON_RESPONSE'):
+            client.fetch('time')
+        self.assertEqual(client.last_response['kind'],'time')
+        self.assertEqual(client.last_response['http_status'],200)
+        self.assertEqual(client.last_response['payload_class'],'HTML')
+        self.assertNotIn('PRIVATE_VALUE',json.dumps(client.last_response))
+        self.assertNotIn('DO_NOT_RECORD',json.dumps(client.last_response))
+
+    def test_oversized_body_remains_bounded_and_reports_safe_size_only(self):
+        client=make_client(opener=FakeOpener(FakeResponse(b'{'+b'a'*6000)),max_response_bytes=4096)
+        with self.assertRaisesRegex(TradingError,'PUBLIC_RESPONSE_TOO_LARGE'):
+            client.fetch('time')
+        self.assertEqual(client.last_response['bytes_read'],4097)
+        self.assertEqual(client.last_response['payload_class'],'JSON_OBJECT')
+
+    def test_valid_public_json_still_passes_with_missing_content_type(self):
+        client=make_client(opener=FakeOpener())
+        self.assertEqual(client.fetch('time')['code'],'0')
+        self.assertEqual(client.last_response['content_type'],'OTHER_OR_MISSING')
+        self.assertEqual(client.last_response['payload_class'],'JSON_OBJECT')
+
+    def test_network_error_diagnostics_never_copy_exception_text(self):
+        client=make_client(opener=FakeOpener(exception=URLError('PRIVATE_MESSAGE_DO_NOT_RECORD')))
+        with self.assertRaisesRegex(TradingError,'PUBLIC_HTTP_UNAVAILABLE'):
+            client.fetch('time')
+        self.assertEqual(client.last_response['content_type'],'NOT_RECEIVED')
+        self.assertNotIn('PRIVATE_MESSAGE',json.dumps(client.last_response))
+
+    def test_catalog_budget_is_explicit_bounded_and_does_not_expand_book_budget(self):
+        response=FakeResponse({'code':'0','data':[{'payload':'x'*5000}]})
+        client=make_client(opener=FakeOpener(response),max_response_bytes=4096,max_catalog_bytes=8192)
+        self.assertEqual(client.fetch('instruments')['code'],'0')
+        with self.assertRaisesRegex(TradingError,'PUBLIC_RESPONSE_TOO_LARGE'):
+            client.fetch('books','BTC-USDT')
+        generic=make_client(opener=FakeOpener(response),max_response_bytes=4096)
+        with self.assertRaisesRegex(TradingError,'PUBLIC_RESPONSE_TOO_LARGE'):
+            generic.fetch('instruments')
+
+    def test_invalid_catalog_budgets_rejected(self):
+        for limit in (0, True, 8_000_001, '8000000'):
+            with self.subTest(limit=limit), self.assertRaisesRegex(TradingError,'INVALID_PUBLIC_CATALOG_POLICY'):
+                make_client(max_catalog_bytes=limit)
+
 
 if __name__ == "__main__":
     unittest.main()
