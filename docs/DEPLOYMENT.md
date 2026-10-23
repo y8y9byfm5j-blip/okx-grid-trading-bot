@@ -11,6 +11,39 @@ Bu sürümde deploy veya aktivasyon workflow'u yoktur. GitHub Actions yalnızca
 GitHub runner'ında doğrulama ve geçici staging provası yapar. SSH, VPS adresi,
 OKX/Telegram anahtarı veya bulut kimliği kullanmaz.
 
+## Devralma sürümünün kapıları
+
+23 Ekim düzeltmeleri yalnız incelenen V7 staging çekirdeğine uygulanmıştır;
+üretimdeki özgün V5 dosyalarının değiştiği anlamına gelmez. Dağıtım paketi
+tam commit, dosya SHA-256 manifest'i, `mode=paper` ve `activation=disabled`
+taşır. `tools/release.py` mevcut dosyanın üstüne yazmaz, üretim yoluna stage
+etmez ve yeni regresyon paketten çıkarılmışsa işlemi reddeder.
+
+Paketin hazır sayılması: 478 offline test, güvenlik taraması, derleme,
+demo ve ayrı geçici staging'in test/health/demo kontrolleri başarılı olmalı.
+GitHub'daki gerçek TR public koşusu ayrıca değerlendirilir. Eşleşmeyen
+ticker/book veya eksik pencere `NO TRADE / DATA_UNVERIFIED` olarak kalır;
+offline başarı bu kabulün yerine geçmez.
+
+Yetkili VPS erişimi geldiğinde şu sıra uygulanır:
+
+1. Salt okunur source/hash, tam unit/scheduler, tek Telegram owner ve
+   üretimde gerçek emirlerin kapalı olduğunu yerinde doğrula.
+2. Kaynak ve durumun özel, tutarlı yedeğini yalnız VPS'te al; özgün unit,
+   çalışma yolu ve geri dönüş sürümünü kaydet. Özel state'i dışarı aktarma.
+3. Paketi ayrı staging köküne hash ile kur; `create_observer` için yeni,
+   ayrı ledger kullan. Mevcut 500/600 ledger'ı değiştirme veya migrate etme.
+4. Aynı capture ile shadow, gerçek Telegram komut/ACK/timeout/restart ve
+   sürekli veri kabulünü mevcut owner üzerinde doğrula. İkinci poller açma.
+5. Sağlık ve geri dönüş kanıtı tamamlanınca yalnız salt okunur observer
+   bağlantısını geçir. Hata varsa eski unit/sürüm/yol ve kendi ledger'ına
+   geri dön; yeni ledger'ı eski üretim state'i yerine koyma.
+
+Bu oturumun teknik erişimi 1. adımı yapamadığından aktivasyon uygulanmaz.
+Gerçek emir yolu pakette yoktur; `LIVE_TRADING=true` veya canlı trading mode
+çalıştırılması hata ile reddedilir. VPS'in gerçek runtime ayarı erişim
+olmadan doğrulandı diye raporlanmaz.
+
 ## VPS kaynaklarını güvenli inceleme
 
 23 Ekim için tek salt okunur hazırlık raporu, yalnız incelenmiş ayrı staging

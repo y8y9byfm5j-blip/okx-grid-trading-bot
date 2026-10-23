@@ -14,7 +14,7 @@ def _share(value, *, change=False):
 
 
 def render_flow(scan, *, detailed=False, suppressed=None, include_watch=False):
-    lines=['V6 SMART MONEY FLOW | READ-ONLY / PAPER',
+    lines=['V6 SMART MONEY FLOW | READ-ONLY / PAPER | '+scan.get('data_status','DATA_UNVERIFIED'),
            'Kaynak https://tr.okx.com | REST snapshot | as-of ms '+str(scan['as_of_ms']),
            f"Keşfedilen {scan['discovered_pairs']} parite; bu batch {len(scan['batch_pairs'])}; sonraki offset {scan['next_offset']}",
            'Batch kapsamı; tüm piyasa eşzamanlı sıralaması değildir.']

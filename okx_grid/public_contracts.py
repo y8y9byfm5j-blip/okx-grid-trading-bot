@@ -105,6 +105,26 @@ def _fresh(at, now, policy):
         raise TradingError("FUTURE_PUBLIC_DATA")
 
 
+def check_snapshot_freshness(report, *, now_ms, policy):
+    """Recheck source clocks and completed bars at the point of use.
+
+    Analysis completion does not refresh an old ticker/book or a candle window.
+    This validates time contracts only; transport provenance is checked separately.
+    """
+    now_ms = milliseconds(now_ms)
+    try:
+        times = {k: milliseconds(report[k]) for k in ("as_of_ms", "ticker_ts_ms", "book_ts_ms")}
+        for at in times.values():
+            _fresh(at, now_ms, policy)
+        if abs(times["ticker_ts_ms"] - times["book_ts_ms"]) > 2000:
+            raise TradingError("INCOHERENT_PUBLIC_SNAPSHOTS")
+        for bar, period in PERIODS.items():
+            if milliseconds(report["completed_bar_end_ms"][bar]) != now_ms // period * period:
+                raise TradingError("STALE_TREND_WINDOW")
+    except (KeyError, TypeError):
+        raise TradingError("INVALID_PUBLIC_DATA") from None
+
+
 def _rows(reply):
     if not isinstance(reply, dict) or reply.get("code") != "0":
         raise TradingError("PUBLIC_RESPONSE_ERROR")

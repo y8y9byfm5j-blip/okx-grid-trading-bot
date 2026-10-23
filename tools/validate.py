@@ -18,6 +18,7 @@ def main():
     required += ["okx_grid/v5_owner_adapter.py", "tests/test_v5_owner_adapter.py",
                  "tools/vps_readiness.py", "tests/test_vps_readiness.py", "okx_grid/v5_setup.py",
                  "tests/test_manual_setup.py", "tools/v5_observer_smoke.py", "docs/MANUAL_OBSERVER_SETUP.md"]
+    required += ["tests/test_source_risk_regressions.py"]
     if any(not (ROOT / p).is_file() for p in required):
         print("Required validation or application file missing.", file=sys.stderr)
         return 1

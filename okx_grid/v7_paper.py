@@ -11,6 +11,7 @@ from .control import receipt, record, snapshot
 from .domain import Market, TradingError, build_plan, floor_step, paper_only, positive, timestamp
 from .paper import PaperTrader, _amount
 from .profiles import load_profile
+from .public_contracts import check_snapshot_freshness
 
 
 class V7PaperTrader(PaperTrader):
@@ -43,9 +44,12 @@ class V7PaperTrader(PaperTrader):
         if self.synthetic:
             return
         if (self._source is None or not self._source.real_transport or not isinstance(report, dict)
-                or report.get("data_status") != "VERIFIED_TR_PUBLIC" or not self._source.authentic(report)
-                or not -2000 <= self._source._now() - report["as_of_ms"] <= self.policy.max_market_age * 1000):
+                or report.get("data_status") != "VERIFIED_TR_PUBLIC" or not self._source.authentic(report)):
             raise TradingError("DATA_UNVERIFIED")
+        try:
+            check_snapshot_freshness(report, now_ms=self._source._now(), policy=self.policy)
+        except TradingError:
+            raise TradingError("DATA_UNVERIFIED") from None
 
     def _frame(self, bot, orders, at):
         self._set_meta("v7_orders_" + bot, orders)

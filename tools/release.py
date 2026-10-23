@@ -30,6 +30,7 @@ REQUIRED = {"okx_grid/__init__.py", "okx_grid/__main__.py", "okx_grid/domain.py"
 REQUIRED.update({"okx_grid/v5_owner_adapter.py", "tests/test_v5_owner_adapter.py",
                  "tools/vps_readiness.py", "tests/test_vps_readiness.py", "okx_grid/v5_setup.py",
                  "tests/test_manual_setup.py", "tools/v5_observer_smoke.py", "docs/MANUAL_OBSERVER_SETUP.md"})
+REQUIRED.add("tests/test_source_risk_regressions.py")
 
 
 def git(*args, root=ROOT):

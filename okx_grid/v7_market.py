@@ -13,7 +13,7 @@ from .domain import TradingError, canonical, symbol
 from .flow_contracts import discover, metric
 from .market_data import book_metrics, market_dict
 from .public_contracts import (PERIODS, TR_ORIGIN, _one, _rows, make_trend,
-                               milliseconds, normalize_market, normalize_return)
+                               check_snapshot_freshness, milliseconds, normalize_market, normalize_return)
 from .public_http import ReadOnlyTRClient
 
 
@@ -56,9 +56,13 @@ class V7MarketData:
         instrument = symbol(instrument)
         with self._lock:
             cached = self._cache.get(instrument)
-            if cached and not refresh and 0 <= self._now() - cached["as_of_ms"] <= 5000:
-                if self._now() - cached["book_ts_ms"] <= self.policy.max_market_age * 1000:
+            now = self._now()
+            if cached and not refresh and 0 <= now - cached["as_of_ms"] <= 5000:
+                try:
+                    check_snapshot_freshness(cached, now_ms=now, policy=self.policy)
                     return deepcopy(cached)
+                except TradingError:
+                    pass  # Recapture at a candle boundary or expired source clock.
             try:
                 result = self._capture(instrument)
                 sid = hashlib.sha256(canonical(result).encode()).hexdigest()
@@ -70,7 +74,9 @@ class V7MarketData:
                 if len(self._cache) > 100:
                     self._cache.pop(next(iter(self._cache)))
                 self.last_health = {"ok": True, "data_status": result["data_status"],
-                                    "checked_at_ms": result["as_of_ms"], "book_ts_ms": result["book_ts_ms"]}
+                                    "checked_at_ms": result["as_of_ms"], "book_ts_ms": result["book_ts_ms"],
+                                    "ticker_ts_ms": result["ticker_ts_ms"],
+                                    "completed_bar_end_ms": deepcopy(result["completed_bar_end_ms"])}
                 return result
             except TradingError as error:
                 self.invalidate(error.code)
@@ -93,22 +99,37 @@ class V7MarketData:
         replies = {b: self.client.fetch("grid_candles", instrument, bar=b) for b in PERIODS}
         btc_replies = ({b: replies[b] for b in ("1H", "4H")} if instrument == "BTC-USDT" else
                        {b: self.client.fetch("grid_candles", "BTC-USDT", bar=b) for b in ("1H", "4H")})
+        tickers, books, capture = [], [], None
         for attempt in range(3):
-            ticker = self.client.fetch("ticker", instrument)
-            books = self.client.fetch("books", instrument)
+            tickers.append(self.client.fetch("ticker", instrument))
+            books.append(self.client.fetch("books", instrument))
             now = self._now()
             if not 0 <= now - start <= 10000:
                 raise TradingError("PUBLIC_CAPTURE_TOO_SLOW")
-            try:
-                capture = normalize_market(instrument, instruments, ticker, books, source_origin=TR_ORIGIN,
-                                           now_ms=now, policy=self.policy, previous=self._cursors.get(instrument),
-                                           enforce_policy=False)
+            # Independent REST caches may interleave replies. Join only the
+            # <=3 observations in this capture, with every original validator:
+            # exact bid/ask, <=2s distance, freshness and prior cursor. No price
+            # tolerance, global fallback, cross-call cache or extra GET budget.
+            for book_index in reversed(range(len(books))):
+                for ticker_index in reversed(range(len(tickers))):
+                    ticker = tickers[ticker_index]
+                    try:
+                        capture = normalize_market(instrument, instruments, ticker, books[book_index],
+                            source_origin=TR_ORIGIN, now_ms=now, policy=self.policy,
+                            previous=self._cursors.get(instrument), enforce_policy=False)
+                        alignment = {"attempts": attempt + 1, "ticker_observation": ticker_index + 1,
+                                     "book_observation": book_index + 1}
+                        break
+                    except TradingError as error:
+                        if error.code not in {"INCOHERENT_PUBLIC_TOP_OF_BOOK", "INCOHERENT_PUBLIC_SNAPSHOTS"}:
+                            raise
+                        alignment_error = error.code
+                if capture is not None:
+                    break
+            if capture is not None:
                 break
-            except TradingError as error:
-                if attempt == 2 or error.code not in {"INCOHERENT_PUBLIC_TOP_OF_BOOK", "INCOHERENT_PUBLIC_SNAPSHOTS"}:
-                    raise
-                # Discard both replies, retain exact equality and the original
-                # capture deadline. Structural/stale/sequence errors never retry.
+        if capture is None:
+            raise TradingError(alignment_error)
         if len(capture.market.bids) != 400 or len(capture.market.asks) != 400:
             raise TradingError("INCOMPLETE_400_LEVEL_BOOK")
         returns, completed = {}, {}
@@ -136,6 +157,7 @@ class V7MarketData:
                 "integrity_validated": True, "live_enabled": False, "as_of_ms": now,
                 "server_ts_ms": server, "ticker_ts_ms": milliseconds(_one(ticker)["ts"]),
                 "book_ts_ms": capture.cursor.at_ms, "sequence": capture.cursor.sequence,
+                "capture_alignment": alignment,
                 "market": market_dict(capture.market), "trend": trend,
                 "rules": {"tick_size": str(capture.rules.tick_size), "lot_size": str(capture.rules.lot_size),
                           "min_size": str(capture.rules.min_size)},

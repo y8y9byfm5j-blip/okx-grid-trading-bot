@@ -184,9 +184,11 @@ class RiskPolicy:
             raise TradingError("WIDE_SPREAD")
         if abs(market.price / ((market.bid + market.ask) / 2) - 1) > Decimal("0.01"):
             raise TradingError("PRICE_BOOK_DIVERGENCE")
-        # Only count displayed liquidity within 0.5% of the touch, on both sides.
-        bid_depth = sum((p * q for p, q in market.bids if p >= market.bid * Decimal("0.995")), Decimal(0))
-        ask_depth = sum((p * q for p, q in market.asks if p <= market.ask * Decimal("1.005")), Decimal(0))
+        # Match the reported +/-0.5% band around the same midpoint. Measuring
+        # from each touch includes extra, unreported liquidity across the spread.
+        mid = (market.bid + market.ask) / 2
+        bid_depth = sum((p * q for p, q in market.bids if p >= mid * Decimal("0.995")), Decimal(0))
+        ask_depth = sum((p * q for p, q in market.asks if p <= mid * Decimal("1.005")), Decimal(0))
         if min(bid_depth, ask_depth) < capital * self.min_depth_multiple:
             raise TradingError("INSUFFICIENT_DEPTH")
 

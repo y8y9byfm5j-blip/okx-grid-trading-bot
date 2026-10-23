@@ -10,9 +10,9 @@ import hashlib
 
 from .control import notices, pin, queue_notice, receipt, record, snapshot
 from .domain import Market, TradingError, build_plan, canonical, identifier, paper_only, symbol, timestamp
-from .v7_decision import GRID_FILTERS, PlanningPolicy, decide
+from .v7_decision import DECISION_REVISION, GRID_FILTERS, PlanningPolicy, decide
 from .v7_paper import V7PaperTrader
-from .public_contracts import TR_ORIGIN
+from .public_contracts import TR_ORIGIN, check_snapshot_freshness
 
 
 class V7Core:
@@ -48,6 +48,7 @@ class V7Core:
         with self.trader._transaction():
             setup = self.trader._meta("v5_manual_setup") or {"name": "V7_REFERENCE", "revision": 1}
         result = {"name": setup["name"], "revision": setup["revision"],
+            "decision_revision": DECISION_REVISION,
             "execution_stage": "OBSERVATION_ONLY" if self.observation_only else "PAPER",
             "source_origin": TR_ORIGIN, "transport": "REST_SNAPSHOT", "leverage": "1",
             "grid": {"min_quote_volume_usdt": str(policy.min_quote_volume),
@@ -72,9 +73,7 @@ class V7Core:
         if (not self.trader.synthetic and
                 (not self.market.real_transport or report["data_status"] != "VERIFIED_TR_PUBLIC")):
             raise TradingError("DATA_UNVERIFIED")
-        now = self.market._now()
-        if not -2000 <= now - report["as_of_ms"] <= self.trader.policy.max_market_age * 1000:
-            raise TradingError("STALE_PUBLIC_DATA")
+        check_snapshot_freshness(report, now_ms=self.market._now(), policy=self.trader.policy)
 
     def decision(self, instrument, capital="300", *, refresh=False):
         report = self.market.capture(instrument, refresh=refresh)
@@ -119,7 +118,12 @@ class V7Core:
         now = self.market._now()
         # Never rank an earlier candidate whose capture expired during the batch.
         for value in results:
-            if "as_of_ms" in value and now - value["as_of_ms"] > self.trader.policy.max_market_age * 1000:
+            if "as_of_ms" not in value:
+                continue
+            try:
+                check_snapshot_freshness({**value["market_summary"], "as_of_ms": value["as_of_ms"]},
+                                         now_ms=now, policy=self.trader.policy)
+            except TradingError:
                 value.update(eligible=False, technical_eligible=False, action="NO TRADE",
                              reasons=value["reasons"] + ["STALE_BATCH_CANDIDATE"])
         with self.trader._transaction():
@@ -211,8 +215,13 @@ class V7Core:
             # good pair must not hide an earlier pair's unresolved failure.
             data_errors = deepcopy(last["result"]["data_errors"]) if last else []
         health = deepcopy(self.market.last_health)
-        if health.get("ok") and self.market._now() - health.get("checked_at_ms", 0) > self.trader.policy.max_market_age * 1000:
-            health.update(ok=False, data_status="DATA_UNVERIFIED", reason="STALE_CONNECTION_HEALTH")
+        if health.get("ok"):
+            try:
+                check_snapshot_freshness({**health, "as_of_ms": health.get("checked_at_ms")},
+                                         now_ms=self.market._now(), policy=self.trader.policy)
+            except TradingError as error:
+                health.update(ok=False, data_status="DATA_UNVERIFIED", reason="STALE_CONNECTION_HEALTH",
+                              source_reason=error.code)
         if data_errors:
             health.update(ok=False, data_status="DATA_UNVERIFIED", reason="UNRESOLVED_CYCLE_DATA_ERROR",
                           failed_cycle_id=last_id, data_errors=data_errors)
@@ -221,7 +230,9 @@ class V7Core:
             flow_health.update(ok=False,data_status='DATA_UNVERIFIED',
                                reason='STALE_FLOW_HEALTH' if flow_age>=0 else 'FUTURE_FLOW_HEALTH')
         return {"mode": "paper", "market": health, "flow": flow_health, "paper": state,
-                "engine_armed": not self.observation_only and started and not state["paused"] and not state["halted"] and not data_errors,
+                "engine_armed": (not self.observation_only and started and not state["paused"] and not state["halted"]
+                                 and not data_errors and health.get("ok") is True
+                                 and (self.trader.synthetic or health.get("data_status") == "VERIFIED_TR_PUBLIC")),
                 "execution_stage": "OBSERVATION_ONLY" if self.observation_only else "PAPER",
                 "service": "V5_NOT_CONNECTED", "scheduler": "NOT_VERIFIED", "telegram": "NOT_VERIFIED",
                 "live_enabled": False, "LIVE_TRADING": False}

@@ -25,7 +25,7 @@ def main(argv=None):
         if report["data_status"] != "VERIFIED_TR_PUBLIC":
             raise TradingError("DATA_UNVERIFIED")
         summary = ({k: report[k] for k in ("source_origin", "exchange", "transport", "data_status",
-            "snapshot_id", "as_of_ms", "server_ts_ms", "ticker_ts_ms", "book_ts_ms", "sequence", "completed_bar_end_ms")} |
+            "snapshot_id", "as_of_ms", "server_ts_ms", "ticker_ts_ms", "book_ts_ms", "sequence", "completed_bar_end_ms", "capture_alignment")} |
             {"ok": True, "live_enabled": False, "bid_levels": report["book"]["bid_levels"],
              "ask_levels": report["book"]["ask_levels"], "book_age_ms": report["as_of_ms"] - report["book_ts_ms"]})
         if args.include_plan:

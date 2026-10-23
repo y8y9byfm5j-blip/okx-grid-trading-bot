@@ -1,5 +1,48 @@
 # İnceleme ve teslim durumu — 23 Ekim 2026
 
+## Devralma denetimi — kaynak zamanı ve risk düzeltmeleri
+
+GitHub V7 başlangıcı `149a40cbe3f05c7d8f4727d379ca13e5b706d120`,
+tree `4b45db4020f8b50c5405f4674433581f96cfaf67` ile bütün 85 dosya
+eşleştirildi. PR #1 → #7 → #10 bağımlılıkları ve issue #5/#6/#8/#9 incelendi.
+Main ve üretim servisi değişmedi; özgün VPS V5 kaynağı hâlâ depoda yok.
+
+Bu geliştirme eski 465 testin üzerine 13 regresyon ekler:
+
+- Risk motorunun derinliği artık raporla aynı midpoint ±%0,5 bandından
+  hesaplanır. Spread kadar dışarıdaki duvarlar likiditeyi şişiremez.
+- Karar, cache, radar batch'i, son paper giriş kapısı ve durum raporu;
+  tamamlanma zamanı yanında ticker/book kaynak zamanlarını ve tamamlanmış
+  15m/1H/4H pencerelerini yeniden denetler. Bir mum sınırını aşan cache
+  yenilenir; eski/gelecek kaynakla motor hazır gösterilmez.
+- V7 REST eşleştirmesi aynı capture içinde en fazla üç ticker/üç book
+  gözleminden tam eşleşme seçer. <=2 saniye fark, tazelik, yapı ve önceki
+  cursor kontrolleri korunur. Ek GET, fiyat toleransı veya başka borsa yok.
+- V5/V6 fixture/enjekte istemci çıktıları açık `DATA_UNVERIFIED` taşır;
+  sentetik V5 verisine canlı etiketi basılmaz. V7 gerçek transport kapısı
+  korunur. Karar sözleşmesi revision 2 ile önceki hesaplardan ayrılır.
+- IRYS ekranındaki .02708849–.15712998 bant/.02668216 stop örneği sabit
+  300 USDT'de risk limitini aşar; küçük tahsise indirilip kabul edilmez.
+  Net/grid her aralığın iki yönlü ücret/kayma hesabından gelir; stop zararı
+  garanti etmez. Mevcut 600 USDT / 2×300 / 3 USDT bot / 6 USDT toplam
+  planlanan risk ve observation-only giriş kilitleri değişmedi.
+
+Yerel doğrulama: **478 test**, derleme, kaynak taraması ve offline demo geçti.
+Yeni regresyonlar düzeltmeden önce hataları üretti. Son commit'in üç Python
+sürümü CI, gerçek public GET ve izole release/staging sonuçları PR #10'da
+raporlanır. Önceki public koşu `39988206523` 7/9'dur; BTC-TRY eşleşmesi ve
+ayrı paper BTC capture'ı reddedilmişti. Bu tarihsel sonuç yeni sürümün kabulü
+sayılmaz; başarısız canlı kabul filtre gevşetilerek geçirilmez.
+
+VPS erişim denemesi: bu ortamda SSH ağı `Network is unreachable`, hazır SSH
+agent/kimlik yok. Verilen DigitalOcean droplet sayfası bu tarayıcıda
+`Site Unavailable` gösterdi; DigitalOcean/SSH eklenti araması da sonuçsuzdu.
+Bu, VPS'in kapalı olduğunun kanıtı değildir. Üretim source/unit/state,
+gerçek Telegram ACK ve üretim LIVE ayarı okunamadı.
+**ACTIVATED=false, TELEGRAM_VERIFIED=false; gerçek para emri gönderilmedi.**
+Dağıtım hazırlığı izole, hash doğrulamalı paket/staging ile sınırlıdır;
+[devralma dağıtım kapıları](DEPLOYMENT.md#devralma-sürümünün-kapıları).
+
 ## Manuel şablon için izleme kurulumu — son geliştirme
 
 - `okxtr-manual-observe-v1` ayrı factory/defter ile hazırdır. Kaynak yalnız

@@ -6,10 +6,11 @@ from types import MappingProxyType
 
 from .domain import (GridPlan, Market, TradingError, canonical, ceil_step,
                      floor_step, number, positive, precise)
-from .public_contracts import InstrumentRules, TR_ORIGIN
+from .public_contracts import InstrumentRules, TR_ORIGIN, check_snapshot_freshness
 
 WEIGHTS = {"data": 20, "liquidity": 15, "trend": 15, "btc_regime": 15,
            "grid_economics": 20, "planned_risk": 15}
+DECISION_REVISION = 2
 GRID_FILTERS = MappingProxyType({"min_return_15m": "0", "min_return_1h": "0", "min_return_4h": "0",
     "max_return_15m": "0.05", "btc_risk_off_1h": "-0.02", "btc_risk_off_4h": "-0.04"})
 
@@ -56,10 +57,12 @@ def decide(report, profile, planning, *, capital="300", now_ms):
 
     if (report.get("source_origin") != TR_ORIGIN or report.get("exchange") != "OKX_TR_SPOT"
             or report.get("integrity_validated") is not True
-            or not -profile.policy.max_future_seconds * 1000 <= now_ms - report["as_of_ms"] <= profile.policy.max_market_age * 1000
-            or now_ms - report["book_ts_ms"] > profile.policy.max_market_age * 1000
             or len(market.bids) != 400 or len(market.asks) != 400):
         reject("data", "INVALID_OR_STALE_SNAPSHOT")
+    try:
+        check_snapshot_freshness(report, now_ms=now_ms, policy=profile.policy)
+    except TradingError as error:
+        reject("data", error.code)
     try:
         profile.policy.check_market(market, now_ms // 1000, capital)
     except TradingError as error:
@@ -110,7 +113,7 @@ def decide(report, profile, planning, *, capital="300", now_ms):
     if not verified:
         reasons.append("DATA_UNVERIFIED")
     configuration = {"profile": profile.identity, "planning": asdict(planning), "capital": str(capital),
-                     "grid_filters": dict(GRID_FILTERS)}
+                     "grid_filters": dict(GRID_FILTERS), "decision_revision": DECISION_REVISION}
     config_id = hashlib.sha256(canonical(configuration).encode()).hexdigest()
     decision_id = hashlib.sha256((report["snapshot_id"] + config_id).encode()).hexdigest()
     return {"decision_id": decision_id, "snapshot_id": report["snapshot_id"], "configuration_id": config_id,
@@ -126,6 +129,7 @@ def decide(report, profile, planning, *, capital="300", now_ms):
                                "spread_bps": str(market.spread_bps), "quote_volume_24h_usdt": str(market.quote_volume_24h),
                                "book_ts_ms": report["book_ts_ms"], "ticker_ts_ms": report["ticker_ts_ms"],
                                "sequence": report["sequence"],
+                               "completed_bar_end_ms": report["completed_bar_end_ms"],
                                "book_levels": [len(market.bids), len(market.asks)], "trend": report["trend"],
                                "depth_0_5pct": report["book"]["0.5pct"], "depth_1pct": report["book"]["1pct"],
                                "volatility": report["volatility"], "range": report["range"]},

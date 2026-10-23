@@ -148,6 +148,14 @@ class MoneyFlowScanner:
     def _now(self):
         return milliseconds(self.clock_ms())
 
+    @property
+    def real_transport(self):
+        return type(self.client) is ReadOnlyTRClient and self.client._default_transport is True
+
+    @property
+    def data_status(self):
+        return 'VERIFIED_TR_PUBLIC' if self.real_transport else 'DATA_UNVERIFIED'
+
     def _trade_pages(self,instrument,end):
         page=self.client.fetch('trades',instrument)
         pages=[page]
@@ -267,6 +275,7 @@ class MoneyFlowScanner:
                 fresh(book['cursor']['at_ms'],now)
             flow=taker_flow(pages,instrument,metadata['quote'],fx,start_ms=start-300000,end_ms=start)
             report={'instrument':instrument,'base':metadata['base'],'quote':metadata['quote'],'source_origin':TR_ORIGIN,
+                    'data_status':self.data_status,
                     'as_of_ms':now,'ticker_ts_ms':at,'flow_window_end_ms':start,
                     'last_price_native':metric(positive(ticker['last'])),
                     'last_price_usdt_estimate':metric(quote_to_usdt(ticker['last'],metadata['quote'],fx,now)),
@@ -388,7 +397,9 @@ class MoneyFlowScanner:
                 coin['reasons'].append('INCOMPLETE_UNIVERSE_VOLUME')
                 coin['volume_share_24h']=None
                 coin['share_change']=None
+        verified = self.real_transport and any('error' not in row for row in reports.values())
         return {'source_origin':TR_ORIGIN,'as_of_ms':now,'server_ts_ms':server,'live_enabled':False,
+                'data_status':'VERIFIED_TR_PUBLIC' if verified else 'DATA_UNVERIFIED',
                 'scope':'DISCOVERED_UNIVERSE_BOUNDED_BATCH_NOT_ALL_MARKET_SIMULTANEOUS',
                 'universe_hash':universe_hash,'discovered_pairs':len(pairs),'excluded_quotes':excluded,
                 'offset':offset,'next_offset':offset+len(batch) if offset+len(batch)<len(names) else None,
