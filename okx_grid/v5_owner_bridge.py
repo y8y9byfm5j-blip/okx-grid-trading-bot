@@ -4,6 +4,8 @@ The existing owner passes the full update. This module never polls, sends,
 imports production V5, or reads its offset/state files. Its checkpoint and
 outbox live only in the separate V7 ledger. Deployment remains unverified.
 """
+import re
+
 from .control import mark_notice, notices, pin, queue_notice, receipt, record, snapshot
 from .domain import TradingError, paper_only, timestamp
 from .telegram_control import authorize_update
@@ -38,7 +40,9 @@ class V5OwnerBridge:
             return self.trader._meta("v5_owner_next_offset")
 
     def _delivery(self, uid):
-        notice = "v7u_" + str(uid)
+        return self._notice_delivery("v7u_" + str(uid))
+
+    def _notice_delivery(self, notice):
         if receipt(self.trader, "notice_ack:" + notice, "paper_notice_ack"):
             return "ACK"
         if receipt(self.trader, "notice_unknown:" + notice, "paper_notice_unknown"):
@@ -132,12 +136,41 @@ class V5OwnerBridge:
             prepared = receipt(self.trader, "v5_owner_update:" + str(uid), "v5_owner_update")
             if not prepared or not prepared["result"]["handled"]:
                 raise TradingError("TELEGRAM_REPLY_NOT_PREPARED")
-            status = self._delivery(uid)
+            return self.begin_notice_delivery("v7u_" + str(uid), now=now)
+
+    def _notice_text(self, notice_id):
+        # Only this bridge's replies and the V7 core's cycle summaries may be
+        # handed to the existing sender. Legacy/V6 outboxes are not adopted.
+        if not isinstance(notice_id, str) or not re.fullmatch(r"v7u_[0-9]+|v7c_[0-9a-f]{28}", notice_id):
+            raise TradingError("TELEGRAM_NOTICE_NOT_OWNED")
+        value = receipt(self.trader, "notice:" + notice_id, "paper_notice")
+        if value is None:
+            raise TradingError("TELEGRAM_REPLY_NOT_PREPARED")
+        if notice_id.startswith("v7u_"):
+            prepared = receipt(self.trader, "v5_owner_update:" + notice_id[4:], "v5_owner_update")
+            if not prepared or not prepared["result"]["handled"] or prepared["result"]["message"] != value["text"]:
+                raise TradingError("TELEGRAM_REPLY_NOT_PREPARED")
+        return value["text"]
+
+    def pending_notifications(self):
+        """Unattempted replies and cycle summaries; no legacy outbox adoption."""
+        paper_only()
+        with self.trader._transaction():
+            return [{"notice_id": n["notice_id"], "text": self._notice_text(n["notice_id"])}
+                    for n in notices(self.trader) if n["status"] == "PENDING" and
+                    n["notice_id"].startswith(("v7u_", "v7c_"))]
+
+    def begin_notice_delivery(self, notice_id, *, now):
+        """Journal UNKNOWN before the owner invokes its existing send(text)."""
+        paper_only()
+        timestamp(now)
+        with self.trader._transaction():
+            text = self._notice_text(notice_id)
+            status = self._notice_delivery(notice_id)
             if status != "PENDING":
                 return {"send_allowed": False, "delivery": status, "live_enabled": False}
-            mark_notice(self.trader, "v7u_" + str(uid), "UNKNOWN", now)
-            return {"send_allowed": True, "delivery": "UNKNOWN", "text": prepared["result"]["message"],
-                    "live_enabled": False}
+            mark_notice(self.trader, notice_id, "UNKNOWN", now)
+            return {"send_allowed": True, "delivery": "UNKNOWN", "text": text, "live_enabled": False}
 
     def pending_deliveries(self):
         """Recover unsent bridge replies after restart; UNKNOWN is never retried."""
@@ -158,8 +191,8 @@ class V5OwnerBridge:
     def record_delivery(self, uid, reply, *, now):
         """Only a matching Telegram JSON acknowledgement can establish ACK.
 
-        A legacy send(text) returning None cannot establish success. Unknown
-        deliveries pause buys and must not be automatically resent.
+        The observed V5 send(text) returns the actual API JSON. None cannot
+        establish success. Unknown deliveries must not be automatically resent.
         """
         paper_only()
         timestamp(now)
@@ -169,7 +202,15 @@ class V5OwnerBridge:
             prepared = receipt(self.trader, "v5_owner_update:" + str(uid), "v5_owner_update")
             if not prepared or not prepared["result"]["handled"]:
                 raise TradingError("TELEGRAM_REPLY_NOT_PREPARED")
-            status = self._delivery(uid)
+            return self.record_notice_delivery("v7u_" + str(uid), reply, now=now)
+
+    def record_notice_delivery(self, notice_id, reply, *, now):
+        """Validate the same ACK contract for replies and cycle summaries."""
+        paper_only()
+        timestamp(now)
+        with self.trader._transaction():
+            text = self._notice_text(notice_id)
+            status = self._notice_delivery(notice_id)
             if status == "PENDING":
                 raise TradingError("TELEGRAM_DELIVERY_NOT_BEGUN")
             if status == "ACK":
@@ -178,9 +219,10 @@ class V5OwnerBridge:
             chat = result.get("chat") if isinstance(result, dict) else None
             valid = (isinstance(chat, dict) and type(chat.get("id")) is int and chat["id"] == self.allowed_chat
                      and type(result.get("message_id")) is int and result["message_id"] > 0
-                     and result.get("text") == prepared["result"]["message"])
+                     and result.get("text") == text)
             if valid:
-                mark_notice(self.trader, "v7u_" + str(uid), "ACK", now)
+                mark_notice(self.trader, notice_id, "ACK", now)
+                self.trader._set_meta("v5_owner_last_ack_at", now)
             else:
                 self.trader.pause()
             return {"delivery": "ACK" if valid else "UNKNOWN", "live_enabled": False}

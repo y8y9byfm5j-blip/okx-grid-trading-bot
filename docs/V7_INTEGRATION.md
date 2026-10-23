@@ -1,13 +1,22 @@
 # V5 / V6 / V7 — 600 USDT paper entegrasyon adayı
 
-Güncel kaynak kontrolü (22 Ekim): kullanıcı görüntüleri mevcut Telegram
-systemd servisinin active olduğunu, çalışma dizinini, Python 3.12 executable'ını,
-fonksiyon imzalarını ve üç maskeli AST gövdesini doğruladı. Doğrudan VPS/SSH
+Güncel kaynak kontrolü (22–23 Ekim): ekranlar mevcut Telegram servisini,
+çalışma dizinini, Python executable'ını, grid timer koşularını, komut döngüsünü
+ve API/send/offset/refresh/plans maskeli gövdelerini gösterdi. `send` API
+JSON'unu döndürüyor; offset düz dosya yazımıdır. Doğrudan VPS/SSH
 erişimi ve dokuz tam kaynak hâlâ yok. Gözlenen owner akışına uygun
 `V5OwnerBridge` staging'de geliştirildi: tam update ACL, durable checkpoint,
 outbox/restart ve gönderim UNKNOWN/ACK sözleşmesi. 15 yeni sentetik test
 eklendi; üretime uygulanmadı. Kesin gözlemler, bilinmeyenler ve kalan
 kapılar: [V5_OWNER_BRIDGE.md](V5_OWNER_BRIDGE.md).
+
+`V5OwnerAdapter` mevcut owner'ın getUpdates JSON'unu batch olarak doğrular
+ve yalnız sağlanan `send(text)` callback'ini çağırır. Komut/çevrim bildirimleri
+için UNKNOWN/ACK, poll-failure pause, sınırlı bekleme ve 30 saniyelik yerel
+bildirim kapısı vardır; yeni poller yoktur. 16 sentetik adapter ve 10 host
+readiness senaryosu eklendi. `tools/vps_readiness.py` kaynakları çalıştırmadan
+hash/unit/TR raporu üretir; yerel/CI sonucu VPS/Telegram kabulü değildir.
+Kullanım: [DEPLOYMENT.md](DEPLOYMENT.md).
 
 Son staging kabulü native komutlardan iki ayrı 300 USDT rezervasyonuna,
 partial fill/replay/restart ve kalıcı emergency stop'a kadar birlikte test
@@ -174,14 +183,16 @@ kanıtlanmış değildir.
 Yerel gerçek `tools/public_smoke.py` ve `tools/v7_smoke.py --allow-public-network
 --symbol BTC-USDT` denemeleri: `PUBLIC_HTTP_UNAVAILABLE`, exit 2.
 **VPS_REAL_API_VERIFIED=false; yerelde DATA_UNVERIFIED.** Ayrı runner'daki
-başarılı BTC/SOL snapshot'ları yukarıda kayıtlıdır. V6 BTC kabulü eksik işlem
-penceresi/ticker uyumsuzluğu nedeniyle hâlâ başarısızdır. Global OKX, relay, proxy veya
+başarılı BTC/SOL snapshot'ları yukarıda kayıtlıdır. Son önceki `6908f14`
+koşusunda V6 BTC-USDT/SOL-USDT tam flow geçti; BTC-TRY ticker/book uyumu
+başarısız kaldı (public workflow 7/8, toplam başarısız). Global OKX, relay, proxy veya
 sentetik fiyatla bu başarısızlık örtülmez. Resmî dokümana erişilebilmesi gerçek
 API bağlantısının çalıştığı anlamına gelmez.
 
 Asistanın yerel ortamında `/opt/okx-grid-demo/v5` ve yetkili uzak terminal
 erişimi yok. Kullanıcı ekranı üretimde bu dizini, active Telegram servisini ve
-Python 3.12 executable'ını doğruladı. Tam kaynak, scheduler, bağımlılıklar,
+Python executable'ını ve grid timer koşularını gösterdi. Tam kaynak/unit,
+maskeli alanlar, scheduler sözleşmesi, bağımlılıklar,
 aktif commit, durum defteri ve gerçek Telegram e2e **DOĞRULANMADI**.
 
 ## 4. Telegram'da gerçekten etkin özellikler

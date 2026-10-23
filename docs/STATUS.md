@@ -2,6 +2,24 @@
 
 ## V7 görev emri — güncel durum
 
+- 23 Ekim owner sözleşmesi ilerlemesi: son ekranlar `api`'nin JSON,
+  `send`'in bu API sonucunu döndürdüğünü ve offset'in düz dosya yazımı olduğunu
+  gösterdi. Önceki altı gövde eksiği kapandı; maskeli alanlar, tam kaynak/hash
+  ve üretim bağlantısı hâlâ inceleme bekliyor.
+- `V5OwnerAdapter` mevcut getUpdates sonucunun bütün batch'ini kontrol eder,
+  kimlik/ACL bayraklarını korur ve bridge cursor/outbox'ını kullanır. Mevcut
+  send callback'i için komut/çevrim yanıtlarında UNKNOWN/ACK, restart ve yerel
+  heartbeat kapısı eklendi. Poll hatası kalıcı pause/bounded bekleme önerir;
+  ağın düzelmesi resume değildir. Yeni poller/token/servis veya production
+  import'u yoktur.
+- `tools/vps_readiness.py` salt okunur source/hash + üç bilinen unit + opt-in
+  gerçek TR capture raporu hazırdır. Yerel çalışma VPS kanıtı değildir;
+  production-ready veya Telegram verified üretmez.
+- Yerel tam doğrulama: 433 test, derleme, 80 dosya kaynak taraması ve offline
+  demo geçti. Ayrı geçici release staging `staged=true/activated=false` geçti.
+  Gerçek yerel readiness denemesi exit 2: kaynak/systemd bu hostta yok; TR
+  time GET yanıt alamadı, DATA_UNVERIFIED kaldı. Bu VPS'in ağ sonucu değildir.
+
 - Canlı flow raporu: V7 /paraakisi SOL ve /momentum SOL-USDT doğrudan hedefi
   inceler. NO TRADE'de de geçerli defter/agresif alış-satış/CVD/RVOL/pencere
   ölçümleri görünür. Flow sağlığı /durum'da GRID'den ayrı izlenir.
@@ -13,7 +31,8 @@
   active, `/opt/okx-grid-demo/v5` çalışma dizini ve `/usr/bin/python3.12`
   executable'ı görüldü. `docker` komutu yok; container/venv yokluğu bundan
   çıkarılamaz. İmzalar ve `find_plan`/`handle`/`main` maskeli AST'si görüldü;
-  tam kaynak, API/sender/offset sözleşmeleri ve doğrudan VPS erişimi hâlâ yok.
+  tam kaynak/hash, maskeli alanlar ve doğrudan VPS erişimi hâlâ yok. API/send/
+  offset gövdeleri yukarıda güncellendi; yeniden eksik sayılmaz.
 - Yeni `V5OwnerBridge` gözlenen mevcut owner akışı için staging'de hazır:
   tam update ACL, sonuç/outbox sonrası atomik checkpoint, restart/PENDING
   kurtarma, gönderim öncesi UNKNOWN, eşleşen JSON ACK ve sanitized hata.
@@ -44,7 +63,8 @@
 - V6 gerçek runner kabulünde BTC-USDT/SOL-USDT tam beş dakikalık flow geçti;
   BTC-TRY stale/ticker-book kontrollerinde reddedilmeye devam ediyor. İlk
   eksik pencere sonuçları aşağıda tarihçe olarak tutulur; eksik CVD kabul edilmez.
-- 407 offline regresyon (15 bridge, 12 çevrim/teşhis/birleşik kabul ve 15 flow izleme testi dahil). Son exact-head CI
+- Önceki 407 offline regresyona 16 owner-adapter ve 10 salt okunur readiness
+  senaryosu eklendi. Son toplam ve exact-head CI
   sonucu PR'da ayrıca raporlanır. Enstrüman kataloğunun 1 MB aşması için yalnız
   katalog bütçesi sınırlandırılarak ayrıldı; açık parite hedefi korunur;
   tüm pair'leri reddedilen V6 smoke JSON'da da `ok=false` döndürür.
@@ -72,9 +92,18 @@
   risk >3 ve downtrend nedeniyle NO TRADE, 600 nakit/0 rezerv/0 pozisyon;
   restart/replay/halt geçti. Bağımsız SOL top-of-book ve BTC-TRY stale reddi
   sürdü. Sürekli veri akışı veya iki açık paper pozisyon kabulü değildir.
+- Son runtime ekranı: Telegram active/running; grid timer'ı ve yaklaşık 15
+  dakikalık başarılı görevler görüldü. Inactive olmuş başarılı görev tek başına
+  arıza değildir. Geçmiş Telegram DNS/502/timeout kayıtları güncel bağlantı
+  veya OKX kök nedeni kanıtı değildir. "OKX TR" adıyla yapılan son 403 testi
+  `www.okx.com`'adır, gerçek TR testi sayılmaz.
+- Önceki public koşu `6908f14` / `39860473305`: 7/8 geçti, workflow başarısız;
+  BTC-TRY `INCOHERENT_FLOW_SNAPSHOTS` açık. BTC/SOL 400/400, tam flow, paper
+  safety ve V7 flow watch geçti. İki canlı paper pozisyon/streaming kabulü değil.
 - TELEGRAM_VERIFIED=false; ACTIVATED=false. Bu çalışmada gerçek bot üzerinde
   uçtan uca doğrulanan komut **0**. Kısmi kaynak/runtime ekran kanıtı üretim
-  aktivasyonu değildir; scheduler/bağımlılıklar/aktif commit/state doğrulanmadı.
+  aktivasyonu değildir; tam unit/scheduler sözleşmesi, bağımlılıklar, aktif
+  commit ve state doğrulanmadı.
 - Yeni poller/sender veya üretim servisi değişikliği yok. main merge yok.
   Private API ve gerçek emirler yok; LIVE_TRADING=false korunur.
 - Ayrıntılı sekiz bölümlü rapor, bağımlılık denetimi, çağrılabilir sınır,
