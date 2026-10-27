@@ -45,7 +45,7 @@ def safe_path(raw):
 
 def permitted(raw):
     path = PurePosixPath(raw)
-    return safe_path(raw) and (raw in {"README.md", ".gitignore", "V5_COMPATIBILITY.md"} or path.parts[0] in {"okx_grid", "tests", "tools", "docs"})
+    return safe_path(raw) and (raw in {"README.md", ".gitignore", "V5_COMPATIBILITY.md"} or path.parts[0] in {"okx_grid", "tests", "tools", "docs", "deploy"})
 
 
 def build(commit, output, root=ROOT, validate=True):
