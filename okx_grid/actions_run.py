@@ -120,6 +120,10 @@ def main():
     try:
         result = run(os.environ, seconds=int(os.environ.get("RUN_SECONDS", "240")))
     except TradingError as error:
+        if error.code == "TELEGRAM_SETTINGS_MISSING":
+            # Not configured yet: finish green so the owner gets no failure mail every five minutes.
+            print("TELEGRAM_BOT_TOKEN henüz eklenmemiş; bekleniyor.")
+            return 0
         print("Hata:", reason(error.code))
         return 2
     print(f"tur tamam: {result['answered']} komut, {len(result['jobs'])} iş")

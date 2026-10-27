@@ -619,6 +619,20 @@ class ActionsRunTests(unittest.TestCase):
         with self.assertRaises(TradingError):
             Settings.from_env(dict(self.env, TELEGRAM_ALLOWED_CHAT_IDS=""))
 
+    def test_missing_token_ends_green_without_running_anything(self):
+        import io
+        from contextlib import redirect_stdout
+        old = dict(os.environ)
+        try:
+            os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+            out = io.StringIO()
+            with redirect_stdout(out):
+                self.assertEqual(self.run_mod.main(), 0)
+            self.assertIn("bekleniyor", out.getvalue())
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+
     def test_unregistered_chat_only_learns_its_own_id(self):
         bot = self.bot(chats="")
         now = lambda: self.now[0]
