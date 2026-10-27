@@ -1,5 +1,12 @@
 # OKX TR GRID Radar & Paper Trader
 
+**Canlı Telegram servisi:** [docs/LIVE_BOT.md](docs/LIVE_BOT.md). Ana para takibi
+(`/rotasyon`), erken long adayları (`/erkenlong`), coin analizi ve OKX TR'de otomatik
+Spot Grid botu kurulumu (600 USDT, en fazla 2 × 300 USDT). Varsayılan test modudur
+(`GRID_EXECUTION=paper`); gerçek emir yalnız VPS ayarında `GRID_EXECUTION=live` ve
+OKX TR API anahtarıyla açılır. Aşağıdaki paper çekirdeği ve V7 kuralları bu
+servisin karar kaynağıdır.
+
 Öncelik: **mevcut Telegram botunda yalnız doğrulanmış OKX TR canlı verisiyle
 izleme ve analiz**. Anlık fiyat/bid/ask, 400+400 emir defteri ve gerçekleşen
 alış/satış akışı aynı TR kaynağından gelir. Veri yaşı/kaynak/snapshot açıkça

@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {"test_domain.py", "test_paper.py", "test_safety.py", "test_release.py", "test_cli.py", "test_radar.py",
             "test_v5_profile.py", "test_public_contracts.py", "test_automation.py", "test_control.py", "test_public_http.py", "test_market_data.py", "test_money_flow.py", "test_v7.py",
             "test_v5_owner_bridge.py", "test_v7_owner_acceptance.py", "test_paper_acceptance.py", "test_v7_flow_tracking.py",
-            "test_v5_owner_adapter.py", "test_vps_readiness.py", "test_manual_setup.py", "test_source_risk_regressions.py"}
+            "test_v5_owner_adapter.py", "test_vps_readiness.py", "test_manual_setup.py", "test_source_risk_regressions.py", "test_live_bot.py"}
 
 
 def main():

@@ -1,0 +1,26 @@
+[Unit]
+Description=OKX TR Telegram bot (analysis, money rotation, early longs, automatic GRID)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=okxtrbot
+Group=okxtrbot
+WorkingDirectory=/opt/okx-tr-bot
+EnvironmentFile=/etc/okx-tr-bot.env
+Environment=STATE_DIR=/var/lib/okx-tr-bot
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m okx_grid.live_bot
+Restart=on-failure
+RestartSec=20
+StateDirectory=okx-tr-bot
+StateDirectoryMode=0700
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/okx-tr-bot
+
+[Install]
+WantedBy=multi-user.target
