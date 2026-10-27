@@ -67,7 +67,7 @@ büyük olabilir.
 
 ```bash
 git clone -b kur https://github.com/y8y9byfm5j-blip/okx-grid-trading-bot k
-cd k && git pull && setsid nohup bash deploy/kur.sh -y > /root/kur.log 2>&1 &
+git -C k pull && bash k/go
 ```
 
 Kurulum arka planda çalışır; konsol kapansa da devam eder. Telegram'a geçip bota
