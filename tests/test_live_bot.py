@@ -477,6 +477,23 @@ class SetupHelperTests(unittest.TestCase):
             self.assertEqual((values["TELEGRAM_BOT_TOKEN"], values["GRID_EXECUTION"]), (good, "paper"))
             self.assertEqual(env.stat().st_mode & 0o777, 0o600)
             self.assertEqual(setup_helper.token_auto(env, ["nothing here"], api_factory=Api), 3)
+            # Two working bots: the owner picks one by number.
+            third = "555555555:" + "C" * 35
+            original_api = Api
+
+            class TwoBots(original_api):
+                def call(inner, method, body, timeout=20):
+                    if method == "getMe" and inner.value == third:
+                        return {"username": "second_bot"}
+                    return original_api.call(inner, method, body, timeout)
+            self.assertEqual(setup_helper.token_auto(env, [good, third], api_factory=TwoBots, choose=lambda _: "2"), 0)
+            self.assertEqual(setup_helper.read_env(env)["TELEGRAM_BOT_TOKEN"], third)
+            self.assertEqual(setup_helper.token_auto(env, [good, third], api_factory=TwoBots, choose=lambda _: "9"), 3)
+            old = Path(d) / "old" / "v5"
+            (old / "venv" / "lib").mkdir(parents=True)
+            (old / ".env").write_text("BOT=" + good)
+            (old / "venv" / "lib" / "x.py").write_text("ignored")
+            self.assertEqual(setup_helper.tree_files(str(Path(d) / "old")), [str(old / ".env")])
             answers = iter(["wrong", good])
             self.assertEqual(setup_helper.token_ask(env, prompt=lambda _: next(answers), api_factory=Api), 0)
             api = Api(updates=[{"update_id": 7, "message": {"text": "/start", "chat": {"id": 55, "first_name": "E"},

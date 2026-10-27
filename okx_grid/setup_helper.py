@@ -18,9 +18,23 @@ from .domain import TradingError
 
 BOT_AUTH_SHAPE = re.compile(r"(?<![\w:])(\d{6,12}:[A-Za-z0-9_-]{30,64})(?![\w-])")
 OLD_SERVICES = ("okx-telegram-commands.service", "okx-grid-v5.service")
-OLD_GLOBS = ("/opt/okx-grid-demo/v5/.env*", "/opt/okx-grid-demo/.env*", "/opt/okx-grid-demo/v5/*.env",
-             "/opt/okx-grid-demo/v5/*.py", "/opt/okx-grid-demo/v5/*.json", "/opt/okx-grid-demo/v5/*.ini",
-             "/opt/okx-grid-demo/v5/*.conf", "/opt/okx-grid-demo/v5/*/*.env", "/etc/okx-grid*")
+OLD_GLOBS = ("/etc/okx-grid*", "/etc/systemd/system/okx*.service", "/root/.env", "/root/*.env")
+OLD_TREES = ("/opt/okx-grid-demo",)
+SKIP_PARTS = {".git", "site-packages", "venv", ".venv", "__pycache__", "node_modules", "state", "logs", "backups"}
+TEXT_SUFFIXES = {"", ".env", ".py", ".json", ".ini", ".conf", ".cfg", ".toml", ".yaml", ".yml", ".txt", ".sh"}
+
+
+def tree_files(root, limit=5000):
+    """Small text files of the old bot, skipping environments, history and runtime data."""
+    found = []
+    for directory, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in SKIP_PARTS]
+        for name in files:
+            if name.startswith(".env") or os.path.splitext(name)[1] in TEXT_SUFFIXES:
+                found.append(os.path.join(directory, name))
+                if len(found) >= limit:
+                    return found
+    return found
 
 
 def old_sources(service_text=None):
@@ -38,6 +52,8 @@ def old_sources(service_text=None):
     paths.update(m.group(1) for m in re.finditer(r"EnvironmentFile=-?(\S+)", service_text))
     for pattern in OLD_GLOBS:
         paths.update(glob.glob(pattern))
+    for root in OLD_TREES:
+        paths.update(tree_files(root))
     for path in sorted(paths):
         try:
             if os.path.isfile(path) and os.path.getsize(path) <= 2_000_000:
@@ -95,18 +111,27 @@ def bot_name(value, api=None):
     return (result or {}).get("username")
 
 
-def token_auto(env_path, texts=None, api_factory=None):
+def token_auto(env_path, texts=None, api_factory=None, choose=input):
     found = []
     for value in find_tokens(texts if texts is not None else old_sources()):
         name = bot_name(value, api_factory(value) if api_factory else None)
         if name:
             found.append((value, name))
-    if len(found) != 1:
-        print("Eski botun ayarlarında " + ("token bulunamadı." if not found else
-              f"{len(found)} farklı bot bulundu: " + ", ".join("@" + n for _, n in found)))
+    if not found:
+        print("Eski botun ayarlarında çalışan bir bot token'ı bulunamadı.")
         return 3
-    set_env(env_path, "TELEGRAM_BOT_TOKEN", found[0][0])
-    print(f"Mevcut botun token'ı bulundu ve kaydedildi: @{found[0][1]}")
+    pick = found[0]
+    if len(found) > 1:
+        print("Sunucuda birden fazla bot bulundu:")
+        for i, (_, name) in enumerate(found, 1):
+            print(f"  {i}) @{name}")
+        answer = choose("Komutları alacak botun numarasını yazın ve Enter'a basın: ").strip()
+        if not answer.isdigit() or not 1 <= int(answer) <= len(found):
+            print("Geçersiz seçim.")
+            return 3
+        pick = found[int(answer) - 1]
+    set_env(env_path, "TELEGRAM_BOT_TOKEN", pick[0])
+    print(f"Mevcut botun token'ı bulundu ve kaydedildi: @{pick[1]}")
     return 0
 
 

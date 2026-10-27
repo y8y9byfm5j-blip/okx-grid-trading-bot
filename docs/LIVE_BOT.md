@@ -56,7 +56,24 @@ düşürülmelidir. Bu karar size aittir; ayar `/etc/okx-tr-bot.env` içindedir.
 Stop-loss bir hedef fiyattır; ani düşüş/likidite boşluğunda gerçek zarar daha
 büyük olabilir.
 
-## Kurulum — ücretsiz, telefondan veya bilgisayardan (3 adım)
+## Kurulum A — telefondan, depo herkese açıkken (2 kısa komut)
+
+1. GitHub → depo → **Settings** → en alttaki **Danger Zone** → **Change visibility**
+   → **Make public** ve onaylayın. (Depoda şifre/token/anahtar yoktur; tüm geçmiş
+   tarandı.)
+2. https://cloud.digitalocean.com/droplets → droplet'iniz → **Access** →
+   **Launch Droplet Console** (kullanıcı `root`).
+3. Siyah ekrana şu iki satırı **elle yazın** (her satırdan sonra Enter):
+
+```bash
+git clone -b kur https://github.com/y8y9byfm5j-blip/okx-grid-trading-bot k
+bash k/deploy/kur.sh
+```
+
+Güncelleme için: `cd k && git pull && bash deploy/kur.sh`. Kurulumdan sonra depoyu
+aynı ekrandan tekrar **Make private** yapabilirsiniz (güncellemeden önce yeniden açın).
+
+## Kurulum B — bilgisayardan, depo gizliyken (3 adım)
 
 Termius gerekmez. DigitalOcean'ın tarayıcıdaki ücretsiz konsolu kullanılır.
 
