@@ -584,3 +584,94 @@ class RadarAliasTests(LiveBotTests):
         self.assertNotIn("LOW-USDT", text)
         self.assertIn("parite OKX TR'de yok", text)
         self.assertIn("GRID BOTLARI", self.bot.handle(self.message("/paper")))
+
+
+class ActionsRunTests(unittest.TestCase):
+    def setUp(self):
+        from okx_grid import actions_run
+        self.run_mod = actions_run
+        self.dir = tempfile.TemporaryDirectory()
+        self.now = [1_800_000_000]
+        self.env = {"TELEGRAM_BOT_TOKEN": "t:1", "TELEGRAM_ALLOWED_CHAT_IDS": "5", "STATE_DIR": self.dir.name,
+                    "GRID_EXECUTION": "live", "OKX_API_KEY": "abc", "RUNNER_TEMP": self.dir.name}
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def bot(self, chats="5"):
+        env = dict(self.env, TELEGRAM_ALLOWED_CHAT_IDS=chats)
+        bot = LiveBot(self.run_mod.run_settings(env), telegram=FakeTelegram(), reader=reader({}), market=FakeMarket(),
+                      clock_ms=lambda: self.now[0] * 1000)
+        self.calls = []
+        for name, _ in self.run_mod.JOBS:
+            setattr(bot, name, (lambda n: lambda: self.calls.append(n))(name))
+        return bot
+
+    def message(self, text, chat=5, age=0):
+        return {"chat": {"id": chat}, "from": {"id": 1}, "text": text, "date": self.now[0] - age}
+
+    def test_runner_is_forced_to_paper_and_never_holds_okx_keys(self):
+        settings = self.run_mod.run_settings(self.env)
+        self.assertEqual(settings.execution, "paper")
+        self.assertEqual((settings.okx_access, settings.okx_signing, settings.okx_phrase), ("", "", ""))
+        empty = self.run_mod.run_settings(dict(self.env, TELEGRAM_ALLOWED_CHAT_IDS=""))
+        self.assertEqual((empty.allowed_chats, empty.notify_chat), (frozenset(), 0))
+        with self.assertRaises(TradingError):
+            Settings.from_env(dict(self.env, TELEGRAM_ALLOWED_CHAT_IDS=""))
+
+    def test_unregistered_chat_only_learns_its_own_id(self):
+        bot = self.bot(chats="")
+        now = lambda: self.now[0]
+        self.assertTrue(self.run_mod.handle_update(bot, self.message("/start", chat=77), now))
+        self.assertIn("77", bot.telegram.sent[-1][1])
+        self.assertEqual(bot.telegram.sent[-1][0], 77)
+        sent = len(bot.telegram.sent)
+        self.assertFalse(self.run_mod.handle_update(bot, self.message("/acil_durdur", chat=77), now))
+        self.assertFalse(self.run_mod.handle_update(bot, self.message("/start", chat=77, age=3600), now))
+        self.assertEqual(len(bot.telegram.sent), sent)
+        # Only history collection runs before registration; alerts would have no destination.
+        self.assertEqual(self.run_mod.run_jobs(bot, now), ["job_rotation"])
+
+    def test_registered_chat_commands_acl_and_stale_messages(self):
+        bot = self.bot()
+        now = lambda: self.now[0]
+        self.assertTrue(self.run_mod.handle_update(bot, self.message("/durum"), now))
+        self.assertIn("TEST", bot.telegram.sent[-1][1])
+        sent = len(bot.telegram.sent)
+        self.assertFalse(self.run_mod.handle_update(bot, self.message("/durum", chat=9), now))
+        self.assertFalse(self.run_mod.handle_update(bot, self.message("/durum", age=16 * 60), now))
+        self.assertFalse(self.run_mod.handle_update(bot, self.message("selam"), now))
+        self.assertEqual(len(bot.telegram.sent), sent)
+
+    def test_jobs_run_when_due_and_not_again_inside_their_interval(self):
+        bot = self.bot()
+        now = lambda: self.now[0]
+        self.assertEqual(self.run_mod.run_jobs(bot, now), [n for n, _ in self.run_mod.JOBS])
+        self.assertEqual(self.run_mod.run_jobs(bot, now), [])
+        self.now[0] += 130
+        self.assertEqual(self.run_mod.run_jobs(bot, now), ["job_reconcile"])
+        self.now[0] += 16 * 60
+        self.assertEqual(self.run_mod.run_jobs(bot, now), ["job_rotation", "job_reconcile", "job_grid"])
+
+    def test_run_answers_pending_commands_and_persists_the_offset(self):
+        bot = self.bot()
+        queue = [[{"update_id": 10, "message": self.message("/botlar")}], []]
+
+        class Telegram(FakeTelegram):
+            def updates(inner, offset, timeout=50):
+                return queue.pop(0) if queue else []
+        bot.telegram = Telegram()
+        ticks = iter(range(0, 10_000, 40))
+        result = self.run_mod.run({}, seconds=200, bot=bot, now=lambda: self.now[0], monotonic=lambda: next(ticks),
+                                  sleep=lambda s: None)
+        self.assertEqual(result["answered"], 1)
+        self.assertIn("job_rotation", result["jobs"])
+        self.assertIn("GRID BOTLARI", bot.telegram.sent[-1][1])
+        again = LiveBot(self.run_mod.run_settings(self.env), telegram=FakeTelegram(), reader=reader({}),
+                        market=FakeMarket())
+        self.assertEqual(again.grid._meta("telegram_offset"), 11)
+        # A scan stored by an earlier run is what /erkenlong shows in a fresh process.
+        again.grid._set_meta("early_scan", {"at_ms": 1_800_000_000_000, "scanned": 3, "errors": 0, "results": [
+            {"instrument": "AAA-USDT", "score": 80, "label": "GÜÇLÜ", "reasons": ["x"], "ret_7d": 0.1,
+             "ret_30d": 0.2, "volume_ratio": 2.0, "price": 1.0}]})
+        self.assertIn("AAA-USDT", again.handle({"chat": {"id": 5}, "from": {"id": 1}, "text": "/erkenlong"}))

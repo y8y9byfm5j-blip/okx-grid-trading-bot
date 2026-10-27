@@ -1,5 +1,7 @@
 # OKX TR GRID Radar & Paper Trader
 
+**Sunucusuz Telegram botu (GitHub üzerinde, test modu):** [docs/GITHUB_BOT.md](docs/GITHUB_BOT.md).
+
 **Canlı Telegram servisi:** [docs/LIVE_BOT.md](docs/LIVE_BOT.md). Ana para takibi
 (`/rotasyon`), erken long adayları (`/erkenlong`), coin analizi ve OKX TR'de otomatik
 Spot Grid botu kurulumu (600 USDT, en fazla 2 × 300 USDT). Varsayılan test modudur

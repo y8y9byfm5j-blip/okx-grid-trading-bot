@@ -44,14 +44,15 @@ class Settings:
     min_early_volume: Decimal = Decimal("1000000")
 
     @classmethod
-    def from_env(cls, env):
+    def from_env(cls, env, allow_unregistered=False):
         def ids(name):
             try:
                 return frozenset(int(v) for v in env.get(name, "").replace(" ", "").split(",") if v)
             except ValueError:
                 raise TradingError("INVALID_" + name) from None
         chats = ids("TELEGRAM_ALLOWED_CHAT_IDS")
-        if env.get("TELEGRAM_BOT_TOKEN", "CHANGE_ME").strip() in {"", "CHANGE_ME"} or not chats:
+        if (env.get("TELEGRAM_BOT_TOKEN", "CHANGE_ME").strip() in {"", "CHANGE_ME"}
+                or not chats and not allow_unregistered):
             raise TradingError("TELEGRAM_SETTINGS_MISSING")
         execution = env.get("GRID_EXECUTION", "paper").strip().lower()
         if execution not in {"paper", "live"}:
@@ -68,7 +69,7 @@ class Settings:
             raise TradingError("INVALID_GRID_SETTINGS") from None
         return cls(bot_token=env["TELEGRAM_BOT_TOKEN"].strip(), allowed_chats=chats,
                    allowed_users=ids("TELEGRAM_ALLOWED_USER_IDS"),
-                   notify_chat=int(env.get("TELEGRAM_NOTIFY_CHAT_ID") or sorted(chats)[0]),
+                   notify_chat=int(env.get("TELEGRAM_NOTIFY_CHAT_ID") or (sorted(chats)[0] if chats else 0)),
                    state_dir=Path(env.get("STATE_DIR", "/var/lib/okx-tr-bot")), execution=execution,
                    okx_access=env.get("OKX_API_KEY", ""), okx_signing=env.get("OKX_API_SECRET", ""),
                    okx_phrase=env.get("OKX_API_PASSPHRASE", ""), limits=limits,
@@ -162,6 +163,10 @@ class LiveBot:
             except TradingError:
                 log.warning("stored risk override ignored")
 
+    def last_scan(self):
+        """Latest early-long scan: this process's, else the one a previous run stored."""
+        return self.scanner.last or self.grid._meta("early_scan")
+
     def set_risk(self, value):
         """Per-bot planned stop loss, changed from Telegram; capped at 10% of a bot's capital."""
         limits = self.grid.limits
@@ -174,6 +179,8 @@ class LiveBot:
 
     # -- outgoing --------------------------------------------------------------------
     def notify(self, text, chat=None):
+        if not (chat or self.s.notify_chat):
+            return  # not registered yet: no destination
         try:
             self.telegram.send(chat or self.s.notify_chat, text)
         except TradingError as error:
@@ -217,7 +224,7 @@ class LiveBot:
         if name == "/rotasyon":
             return rotation_text(self.rotation.analyze())
         if name == "/erkenlong":
-            return early_text(self.scanner.last)
+            return early_text(self.last_scan())
         if name in {"/analiz", "/grid"}:
             instrument = self.pair(args)
             decision = self.decide(instrument)
@@ -277,7 +284,7 @@ class LiveBot:
 
     def radar_text(self, limit=3):
         """Same V7 grid filters on the most traded USDT pairs; the scheduler rotates through the rest."""
-        coins = self.rotation.latest_coins or coin_volumes(self.reader.spot_tickers())[0]
+        coins = self.rotation.coins() or coin_volumes(self.reader.spot_tickers())[0]
         floor = self.profile.policy.min_quote_volume
         names = [c + "-USDT" for c, v in sorted(coins.items(), key=lambda kv: kv[1]["usdt_volume"], reverse=True)
                  if v["usdt_volume"] >= floor][:limit]
@@ -315,7 +322,7 @@ class LiveBot:
     def status_text(self):
         summary = self.grid.summary()
         health = self.market.last_health
-        scan = self.scanner.last
+        scan = self.last_scan()
         flows_at, _ = self.rotation.latest_flows()
         limits = self.grid.limits
         from .live_reports import when
@@ -338,6 +345,7 @@ class LiveBot:
 
     def job_early(self):
         scan = self.scanner.scan()
+        self.grid._set_meta("early_scan", {**scan, "results": scan["results"][:40]})
         now = self.clock_ms()
         sent = self.grid._meta("early_alerts", {})
         for row in scan["results"]:
@@ -357,7 +365,7 @@ class LiveBot:
             return
         if len(self.grid.active()) >= self.grid.limits.max_bots:
             return
-        coins = self.rotation.latest_coins or {}
+        coins = self.rotation.coins()
         floor = self.profile.policy.min_quote_volume
         names = sorted((c + "-USDT" for c, v in coins.items() if v["usdt_volume"] >= floor),
                        key=lambda n: coins[n[:-5]]["usdt_volume"], reverse=True)

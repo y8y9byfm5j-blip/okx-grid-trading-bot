@@ -20,7 +20,8 @@ import time
 from .tr_public import coin_volumes
 
 HORIZONS = (("4s", 4 * 3_600_000), ("24s", 24 * 3_600_000), ("7g", 7 * 24 * 3_600_000))
-KEEP_MS = 35 * 24 * 3_600_000
+KEEP_MS = 8 * 24 * 3_600_000  # the longest comparison window is 7 days
+STORE_COINS = 200  # most traded coins only; the rest add size but no signal
 
 
 class RotationTracker:
@@ -45,10 +46,11 @@ class RotationTracker:
         with self._lock:
             now = self.clock_ms()
             coins, rate = coin_volumes(self.reader.spot_tickers())
+            top = sorted(coins.items(), key=lambda kv: kv[1]["usdt_volume"] + kv[1]["try_volume"], reverse=True)
             self._db.execute("BEGIN")
             self._db.executemany("INSERT OR REPLACE INTO snaps VALUES(?,?,?,?,?,?)", [
                 (now, c, str(v["usdt_volume"]), str(v["try_volume"]), str(v["price"]),
-                 str(v["change_24h"]) if v["change_24h"] is not None else None) for c, v in coins.items()])
+                 str(v["change_24h"]) if v["change_24h"] is not None else None) for c, v in top[:STORE_COINS]])
             self._db.execute("DELETE FROM snaps WHERE at_ms < ?", (now - KEEP_MS,))
             self._db.execute("COMMIT")
             self.latest_coins = coins
@@ -81,6 +83,11 @@ class RotationTracker:
             self._db.execute("DELETE FROM flows WHERE at_ms < ?", (now - KEEP_MS,))
         return {"at_ms": now, "coins": len(result)}
 
+    def close(self):
+        with self._lock:
+            self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self._db.close()
+
     # -- queries ----------------------------------------------------------------------
     def _last_snapshot_time(self):
         row = self._db.execute("SELECT MAX(at_ms) FROM snaps").fetchone()
@@ -101,6 +108,11 @@ class RotationTracker:
             out[coin] = {"usdt_volume": Decimal(usdt), "try_volume": Decimal(lira), "price": Decimal(price),
                          "change_24h": Decimal(change) if change is not None else None}
         return out
+
+    def coins(self):
+        """Most recent per-coin volumes: this process's scan, else the last stored snapshot."""
+        with self._lock:
+            return self.latest_coins or self._snapshot(self._last_snapshot_time())
 
     def latest_flows(self):
         with self._lock:

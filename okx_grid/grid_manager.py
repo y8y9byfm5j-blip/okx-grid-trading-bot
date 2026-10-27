@@ -121,6 +121,11 @@ class GridBotManager:
         with self._lock:
             self._db.execute(f"UPDATE bots SET {sets} WHERE id=?", (*values.values(), bot_id))
 
+    def close(self):
+        with self._lock:
+            self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self._db.close()
+
     # -- state ------------------------------------------------------------------------
     def auto_enabled(self):
         return bool(self._meta("auto", True))
