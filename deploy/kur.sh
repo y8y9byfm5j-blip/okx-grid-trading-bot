@@ -22,8 +22,13 @@ fi
 say "OKX TR bot kurulumu (TEST modu: gerçek emir gönderilmez)"
 echo "Bu kurulum: kodu $APP içine kurar, eski Telegram komut servisini ($OLD) durdurur"
 echo "(silmez), yeni servisi ($NEW) aynı bot ile başlatır."
-read -r -p "Devam edilsin mi? (e/h): " ok
-case "$ok" in e|E|evet|Evet) ;; *) echo "İptal edildi."; exit 0 ;; esac
+# -y: no questions, for a background run that survives a closed console.
+AUTO=0
+[ "${1:-}" = "-y" ] && AUTO=1
+if [ "$AUTO" -eq 0 ]; then
+  read -r -p "Devam edilsin mi? (e/h): " ok
+  case "$ok" in e|E|evet|Evet) ;; *) echo "İptal edildi."; exit 0 ;; esac
+fi
 
 say "1/5 Kod kuruluyor"
 bash "$SRC/deploy/install.sh"
@@ -32,8 +37,11 @@ say "2/5 Bot token'ı"
 current="$(value TELEGRAM_BOT_TOKEN)"
 if [ -n "$current" ] && [ "$current" != "CHANGE_ME" ]; then
   echo "Ayar dosyasında token zaten var."
-elif ! helper token-auto "$ENV_FILE"; then
+elif ! helper token-auto "$ENV_FILE" </dev/null && [ "$AUTO" -eq 0 ]; then
   helper token-ask "$ENV_FILE"
+elif [ -z "$(value TELEGRAM_BOT_TOKEN)" ] || [ "$(value TELEGRAM_BOT_TOKEN)" = "CHANGE_ME" ]; then
+  echo "Token otomatik bulunamadı. 'bash deploy/kur.sh' ile (-y olmadan) tekrar çalıştırın."
+  exit 1
 fi
 
 say "3/5 Eski bot durduruluyor (aynı token'ı yalnız bir program okuyabilir)"
@@ -62,7 +70,7 @@ chats="$(value TELEGRAM_ALLOWED_CHAT_IDS)"
 if [ -n "$chats" ] && [ "$chats" != "CHANGE_ME" ]; then
   echo "Ayar dosyasında sohbet kimliği zaten var: $chats"
 else
-  helper chat-ask "$ENV_FILE"
+  CHAT_WAIT=$([ "$AUTO" -eq 1 ] && echo 900 || echo 180) helper chat-ask "$ENV_FILE"
 fi
 
 say "5/5 Yeni servis başlatılıyor"

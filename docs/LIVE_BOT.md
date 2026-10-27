@@ -67,8 +67,12 @@ büyük olabilir.
 
 ```bash
 git clone -b kur https://github.com/y8y9byfm5j-blip/okx-grid-trading-bot k
-bash k/deploy/kur.sh
+cd k && git pull && setsid nohup bash deploy/kur.sh -y > /root/kur.log 2>&1 &
 ```
+
+Kurulum arka planda çalışır; konsol kapansa da devam eder. Telegram'a geçip bota
+`/start` yazın (15 dakika beklenir). Sonuç için konsolda `cat /root/kur.log`
+yazın ya da Telegram'a gelen "OKX TR bot başladı" mesajını bekleyin.
 
 Güncelleme için: `cd k && git pull && bash deploy/kur.sh`. Kurulumdan sonra depoyu
 aynı ekrandan tekrar **Make private** yapabilirsiniz (güncellemeden önce yeniden açın).

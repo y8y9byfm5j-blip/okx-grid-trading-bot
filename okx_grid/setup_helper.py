@@ -218,7 +218,11 @@ def token_auto(env_path, texts=None, api_factory=None, choose=input):
         print("Sunucuda birden fazla bot bulundu:")
         for i, (_, name) in enumerate(valid, 1):
             print(f"  {i}) @{name}")
-        answer = choose("Komutları alacak botun numarasını yazın ve Enter'a basın: ").strip()
+        try:
+            answer = choose("Komutları alacak botun numarasını yazın ve Enter'a basın: ").strip()
+        except EOFError:
+            print("Birden fazla bot var; 'bash deploy/kur.sh' ile (-y olmadan) tekrar çalıştırıp numara seçin.")
+            return 3
         if not answer.isdigit() or not 1 <= int(answer) <= len(valid):
             print("Geçersiz seçim.")
             return 3
@@ -247,7 +251,9 @@ def token_ask(env_path, prompt=getpass.getpass, api_factory=None):
     return 3
 
 
-def chat_ask(env_path, api=None, wait_seconds=180, sleep=time.sleep, clock=time.monotonic):
+def chat_ask(env_path, api=None, wait_seconds=None, sleep=time.sleep, clock=time.monotonic):
+    if wait_seconds is None:
+        wait_seconds = int(os.environ.get("CHAT_WAIT", "180"))
     from .live_bot import TelegramAPI
     api = api if api is not None else TelegramAPI(read_env(env_path)["TELEGRAM_BOT_TOKEN"])
     try:
@@ -256,7 +262,7 @@ def chat_ask(env_path, api=None, wait_seconds=180, sleep=time.sleep, clock=time.
         print("Telegram'a bağlanılamadı:", error.code,
               "(TELEGRAM_ERROR_409 ise eski komut servisi hâlâ çalışıyor demektir)")
         return 3
-    print("Şimdi Telegram'da botunuza /start yazın. 3 dakika bekleniyor...")
+    print(f"Şimdi Telegram'da botunuza /start yazın. {wait_seconds // 60} dakika bekleniyor...")
     deadline = clock() + wait_seconds
     while clock() < deadline:
         try:
