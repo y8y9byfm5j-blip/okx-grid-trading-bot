@@ -6,7 +6,7 @@ getUpdates consumer for its bot token. GRID_EXECUTION=paper (default) never
 calls OKX private endpoints; GRID_EXECUTION=live requires OKX TR API keys.
 """
 from dataclasses import dataclass, replace
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 import json
 import logging
 import os
@@ -123,10 +123,12 @@ def build_profile(limits):
     """The agreed V7 rules with the owner's capital and risk limits."""
     from .v7_core import load_v7
     base = load_v7()
+    def fraction(value):  # the policy accepts at most 18 decimals; round toward the safer side
+        return min(value, Decimal(1)).quantize(Decimal("1e-18"), rounding=ROUND_DOWN)
     policy = replace(base.policy, equity=limits.total_capital, max_bot_capital=limits.bot_capital,
-                     max_bots=limits.max_bots, risk_fraction=limits.risk_per_bot / limits.total_capital,
-                     total_risk_fraction=limits.risk_per_bot * limits.max_bots / limits.total_capital,
-                     max_realized_loss_fraction=min(limits.max_realized_loss / limits.total_capital, Decimal(1)))
+                     max_bots=limits.max_bots, risk_fraction=fraction(limits.risk_per_bot / limits.total_capital),
+                     total_risk_fraction=fraction(limits.risk_per_bot * limits.max_bots / limits.total_capital),
+                     max_realized_loss_fraction=fraction(limits.max_realized_loss / limits.total_capital))
     return replace(base, name="okxtr-live-grid", policy=policy)
 
 
@@ -153,6 +155,22 @@ class LiveBot:
         self.scanner = EarlyLongScanner(self.reader, rotation=self.rotation, min_volume=settings.min_early_volume,
                                         clock_ms=self.clock_ms)
         self._stop = threading.Event()
+        override = self.grid._meta("risk_per_bot")
+        if override is not None:
+            try:
+                self.set_risk(Decimal(override))
+            except TradingError:
+                log.warning("stored risk override ignored")
+
+    def set_risk(self, value):
+        """Per-bot planned stop loss, changed from Telegram; capped at 10% of a bot's capital."""
+        limits = self.grid.limits
+        if not value.is_finite() or not Decimal("0.5") <= value <= limits.bot_capital / 10:
+            raise TradingError("INVALID_RISK_VALUE")
+        limits = replace(limits, risk_per_bot=value)
+        self.profile = build_profile(limits)
+        self.grid.limits = limits
+        self.grid._set_meta("risk_per_bot", str(value))
 
     # -- outgoing --------------------------------------------------------------------
     def notify(self, text, chat=None):
@@ -219,6 +237,22 @@ class LiveBot:
                 return "Otomasyon durdurulmuş (" + str(self.grid.halted()) + "). Önce /devam yazın."
             self.grid.set_auto(on)
             return "Otomatik grid " + ("AÇIK" if on else "KAPALI") + (" (TEST modu)" if self.s.execution == "paper" else "")
+        if name == "/risk":
+            limits = self.grid.limits
+            if args:
+                try:
+                    value = Decimal(args[0].replace(",", "."))
+                except ArithmeticError:
+                    raise TradingError("INVALID_RISK_VALUE") from None
+                self.set_risk(value)
+                limits = self.grid.limits
+                head = f"✅ Bot başı risk {limits.risk_per_bot} USDT olarak ayarlandı."
+            else:
+                head = f"Bot başı risk: {limits.risk_per_bot} USDT ({limits.bot_capital} USDT'lik botta)."
+            width = limits.risk_per_bot / limits.bot_capital * 100
+            return "\n".join([head, f"Yaklaşık en geniş grid aralığı: %{max(width - Decimal('0.3'), Decimal(0)):.1f}".replace(".", ","),
+                              f"Toplam zarar sınırı: {limits.max_realized_loss} USDT (aşılınca otomasyon durur).",
+                              f"Değiştirmek için: /risk 10  (0,5 ile {limits.bot_capital / 10:.0f} USDT arası)"])
         if name == "/durdur":
             count = self.grid.stop(self.pair(args))
             return f"{count} bot için durdurma gönderildi; coin USDT'ye satılacak. Sonuç birkaç dakika içinde bildirilir."
@@ -236,7 +270,7 @@ class LiveBot:
     def decide(self, instrument):
         from .v7_decision import decide
         report = self.market.capture(instrument, refresh=True)
-        return decide(report, self.profile, self.planning, capital=str(self.s.limits.bot_capital),
+        return decide(report, self.profile, self.planning, capital=str(self.grid.limits.bot_capital),
                       now_ms=self.market._now())
 
     def coin_extras(self, instrument):
@@ -264,7 +298,7 @@ class LiveBot:
         health = self.market.last_health
         scan = self.scanner.last
         flows_at, _ = self.rotation.latest_flows()
-        limits = self.s.limits
+        limits = self.grid.limits
         from .live_reports import when
         return "\n".join([
             "ℹ️ DURUM", f"Mod: {'GERÇEK EMİR' if self.s.execution == 'live' else 'TEST (paper)'} | "
@@ -302,7 +336,7 @@ class LiveBot:
     def job_grid(self):
         if not self.grid.auto_enabled() or self.grid.halted():
             return
-        if len(self.grid.active()) >= self.s.limits.max_bots:
+        if len(self.grid.active()) >= self.grid.limits.max_bots:
             return
         coins = self.rotation.latest_coins or {}
         floor = self.profile.policy.min_quote_volume
@@ -329,7 +363,7 @@ class LiveBot:
                 if error.code.startswith(("OKX_", "INSUFFICIENT_USDT")):
                     self.notify(f"⚠️ {instrument} grid kurulamadı: {reason(error.code)}")
                 continue
-            if len(self.grid.active()) >= self.s.limits.max_bots:
+            if len(self.grid.active()) >= self.grid.limits.max_bots:
                 return
 
     def scheduler(self):

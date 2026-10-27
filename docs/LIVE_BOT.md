@@ -56,87 +56,69 @@ düşürülmelidir. Bu karar size aittir; ayar `/etc/okx-tr-bot.env` içindedir.
 Stop-loss bir hedef fiyattır; ani düşüş/likidite boşluğunda gerçek zarar daha
 büyük olabilir.
 
-## Kurulum (Termius ile VPS'te)
+## Kurulum (Termius ile VPS'te) — 3 adım
 
-### 1. Kodu sunucuya indirin
+Termius'ta sunucuya bağlanın. Aşağıdaki kutuları sırayla kopyalayıp yapıştırın.
 
-Depo özel olduğu için sunucuya salt okunur bir anahtar verin:
-
-```bash
-sudo ssh-keygen -t ed25519 -N "" -f /root/.ssh/okx_tr_bot_deploy
-sudo cat /root/.ssh/okx_tr_bot_deploy.pub
-```
-
-Çıkan satırı GitHub → depo → **Settings → Deploy keys → Add deploy key** ekranına
-yapıştırın. "Allow write access" **kapalı** kalsın. Sonra:
+### Adım 1 — Sunucuya GitHub okuma anahtarı (bir kez)
 
 ```bash
-sudo GIT_SSH_COMMAND="ssh -i /root/.ssh/okx_tr_bot_deploy -o StrictHostKeyChecking=accept-new" \
-  git clone -b claude/okx-tr-live-grid-bot git@github.com:y8y9byfm5j-blip/okx-grid-trading-bot.git /root/okx-grid-trading-bot
-cd /root/okx-grid-trading-bot
-sudo bash deploy/install.sh
+sudo ssh-keygen -t ed25519 -N "" -f /root/.ssh/okx_tr_bot_deploy -q; sudo cat /root/.ssh/okx_tr_bot_deploy.pub
 ```
 
-### 2. Token'ı girin
+Ekranda `ssh-ed25519 AAAA...` ile başlayan tek bir satır çıkar. Bu satırın tamamını
+kopyalayın. (Dosya zaten var diye sorarsa `n` yazıp Enter'a basın.)
+
+### Adım 2 — Anahtarı GitHub'a ekleyin (telefondan)
+
+1. Açın: https://github.com/y8y9byfm5j-blip/okx-grid-trading-bot/settings/keys/new
+2. **Title:** `VPS`
+3. **Key:** kopyaladığınız `ssh-ed25519 ...` satırı
+4. **Allow write access** kutusu **boş** kalsın → **Add key**
+
+Bu anahtar sunucunun yalnız bu depoyu okumasına izin verir.
+
+### Adım 3 — Kur ve başlat (Termius)
 
 ```bash
-sudo nano /etc/okx-tr-bot.env
+sudo rm -rf /root/okx-tr-bot-src; sudo env GIT_SSH_COMMAND="ssh -i /root/.ssh/okx_tr_bot_deploy -o StrictHostKeyChecking=accept-new" git clone -q -b claude/okx-tr-live-grid-bot git@github.com:y8y9byfm5j-blip/okx-grid-trading-bot.git /root/okx-tr-bot-src && sudo bash /root/okx-tr-bot-src/deploy/kur.sh
 ```
 
-`TELEGRAM_BOT_TOKEN` satırına mevcut botun token'ını yazın (BotFather'daki ile
-aynı). `GRID_EXECUTION=paper` olarak kalsın (test modu, OKX'e emir gitmez).
+Kurulum sırasında:
+- "Devam edilsin mi?" → `e` yazıp Enter.
+- Token eski botun ayarlarından otomatik bulunur. Bulunamazsa sizden ister:
+  BotFather'daki token'ı yapıştırıp Enter'a basın (ekranda görünmez, bu normal).
+- "Şimdi Telegram'da botunuza /start yazın" → Telegram'dan bota `/start` yazın.
+- Sonunda **✅ KURULUM TAMAM** yazar ve Telegram'a "OKX TR bot başladı" mesajı gelir.
 
-### 3. Eski komut servisini durdurun ve sohbet kimliğinizi bulun
+Kurulum eski Telegram komut servisini (`okx-telegram-commands`) durdurur ama silmez.
+`okx-grid-v5.service` zamanlayıcısı çalışmaya devam eder. Bot **TEST modunda**
+başlar: OKX'e gerçek emir gitmez.
 
-Bir Telegram token'ını aynı anda yalnız bir program okuyabilir. Eski komut servisi
-durdurulur ama silinmez:
+### Risk ayarı (Telegram'dan)
 
-```bash
-sudo systemctl stop okx-telegram-commands.service
-sudo systemctl disable okx-telegram-commands.service
-```
+`/risk` mevcut bot başı stop zararını gösterir; `/risk 10` 10 USDT yapar
+(0,5 ile 30 USDT arası). Dosya düzenlemek gerekmez.
 
-Telegram'dan bota `/start` yazın, sonra:
-
-```bash
-cd /opt/okx-tr-bot && sudo bash -c 'set -a; . /etc/okx-tr-bot.env; set +a; python3 -m okx_grid.live_bot --kimlik'
-```
-
-Çıkan `chat_id` değerini `/etc/okx-tr-bot.env` içinde `TELEGRAM_ALLOWED_CHAT_IDS`
-satırına yazın. Bot yalnız bu sohbetten gelen komutlara cevap verir.
-
-### 4. Yeni servisi başlatın
-
-```bash
-sudo systemctl enable --now okx-tr-bot.service
-sudo journalctl -u okx-tr-bot -f
-```
-
-Telegram'da "✅ OKX TR bot başladı" mesajı gelir. `/yardim` yazın.
-`okx-grid-v5.service` zamanlayıcısı çalışmaya devam edebilir. Kayıtlarda
-`TELEGRAM_ERROR_409` görürseniz başka bir program da aynı token'ı okuyordur.
-
-### 5. Gerçek emir moduna geçiş (test sonrası)
+### Gerçek emir moduna geçiş (test sonrası)
 
 1. OKX TR → API yönetimi → yeni API anahtarı: yetki **yalnız İşlem (Trade)**,
    **çekim yetkisi YOK**, IP kısıtı = VPS IP adresi.
-2. `/etc/okx-tr-bot.env` içine `OKX_API_KEY`, `OKX_API_SECRET`, `OKX_API_PASSPHRASE`
-   yazın. Anahtarları sohbete, GitHub'a veya ekran görüntüsüne koymayın.
+2. `sudo nano /etc/okx-tr-bot.env` ile `OKX_API_KEY`, `OKX_API_SECRET`,
+   `OKX_API_PASSPHRASE` satırlarına yazın. Anahtarları sohbete, GitHub'a veya
+   ekran görüntüsüne koymayın.
 3. Anahtarı emir vermeden kontrol edin:
 
 ```bash
-cd /opt/okx-tr-bot && sudo bash -c 'set -a; . /etc/okx-tr-bot.env; set +a; python3 -m okx_grid.live_bot --okx-kontrol'
+cd /opt/okx-tr-bot && sudo bash -c 'set -a; . /etc/okx-tr-bot.env; set +a; "$(cat PYTHON)" -m okx_grid.live_bot --okx-kontrol'
 ```
 
-4. `GRID_EXECUTION=live` yapın ve `sudo systemctl restart okx-tr-bot`.
+4. Aynı dosyada `GRID_EXECUTION=live` yapın ve `sudo systemctl restart okx-tr-bot`.
    Başlangıç mesajında "GERÇEK EMİR modu" yazar.
 
 ## Güncelleme ve geri dönüş
 
-```bash
-cd /root/okx-grid-trading-bot && sudo GIT_SSH_COMMAND="ssh -i /root/.ssh/okx_tr_bot_deploy" git pull
-sudo bash deploy/install.sh && sudo systemctl restart okx-tr-bot
-```
+Yeni sürüm için Adım 3'teki komutu tekrar çalıştırmanız yeterlidir; ayarlar korunur.
 
 Eski bota dönmek için:
 

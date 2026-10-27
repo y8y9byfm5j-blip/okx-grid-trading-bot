@@ -19,7 +19,7 @@ REASONS = {
     "GRID_NOT_PROFITABLE_AFTER_FEES": "komisyon sonrası kâr yok",
     "PRIVATE_OUTCOME_UNKNOWN": "OKX yanıtı alınamadı; birkaç dakika sonra /botlar ile kontrol edin",
     "COMMAND_ARGUMENTS_REQUIRED": "coin adı yazın, ör. /analiz SOL", "INVALID_SPOT_SYMBOL": "geçersiz coin adı",
-    "NO_RUNNING_BOT": "bu coinde çalışan bot yok", "OKX_ACCESS_NOT_CONFIGURED": "OKX API anahtarı ayarlanmamış", "GRID_BELOW_MIN_NOTIONAL": "emir tutarı minimumun altında",
+    "INVALID_RISK_VALUE": "geçersiz risk değeri (ör. /risk 10)", "NO_RUNNING_BOT": "bu coinde çalışan bot yok", "OKX_ACCESS_NOT_CONFIGURED": "OKX API anahtarı ayarlanmamış", "GRID_BELOW_MIN_NOTIONAL": "emir tutarı minimumun altında",
 }
 CLOSE = {"STOP_LOSS": "stop-loss", "TAKE_PROFIT": "kâr al", "MANUAL_STOP": "elle durduruldu",
          "EMERGENCY_STOP": "acil durdurma", "RISK_CONTROL": "OKX risk kontrolü", "STOPPED": "durdu"}
@@ -69,6 +69,7 @@ def help_text(mode):
         "/botlar — açık/kapanan grid botları ve kâr/zarar",
         "/durum — sistem durumu ve limitler",
         "/otomatik ac | /otomatik kapat — otomatik grid kurulumu",
+        "/risk — bot başı stop zararı (ör. /risk 10)",
         "/durdur COIN — o coindeki botu durdur (coin USDT'ye satılır)",
         "/acil_durdur — tüm botları durdur, otomasyonu kapat",
         "/devam — zarar sınırı/acil durdurmadan sonra otomasyonu yeniden aç",

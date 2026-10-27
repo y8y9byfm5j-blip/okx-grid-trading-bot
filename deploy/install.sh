@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Install or update the OKX TR Telegram bot on the VPS. Run as root from the
 # repository checkout: sudo bash deploy/install.sh
-# It never starts the service and never stops the old one; those are explicit
-# steps in docs/LIVE_BOT.md so the single Telegram consumer rule is respected.
+# It never starts the service and never stops the old one; deploy/kur.sh does
+# that so the single Telegram consumer rule is respected.
 set -euo pipefail
 
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
@@ -13,7 +13,15 @@ if [ "$(id -u)" -ne 0 ]; then
   echo "root olarak çalıştırın: sudo bash deploy/install.sh" >&2
   exit 1
 fi
-python3 -c 'import sys; assert sys.version_info >= (3, 11)' || { echo "Python 3.11+ gerekli" >&2; exit 1; }
+PY=""
+for candidate in python3.13 python3.12 python3.11 python3; do
+  path="$(command -v "$candidate" || true)"
+  if [ -n "$path" ] && "$path" -c 'import sys; assert sys.version_info >= (3, 11)' 2>/dev/null; then
+    PY="$path"
+    break
+  fi
+done
+[ -n "$PY" ] || { echo "Python 3.11 veya üstü bulunamadı (sudo apt install python3.12)" >&2; exit 1; }
 
 id okxtrbot >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin okxtrbot
 
@@ -24,6 +32,7 @@ cp -a "$SRC/okx_grid" "$APP/okx_grid.new"
 find "$APP/okx_grid.new" -name '__pycache__' -prune -exec rm -rf {} +
 [ -d "$APP/okx_grid" ] && rm -rf "$APP/okx_grid.old" && mv "$APP/okx_grid" "$APP/okx_grid.old"
 mv "$APP/okx_grid.new" "$APP/okx_grid"
+echo "$PY" > "$APP/PYTHON"
 chown -R root:root "$APP"
 chmod -R a+rX "$APP"
 
@@ -33,8 +42,8 @@ if [ ! -f "$ENV_FILE" ]; then
 fi
 chmod 600 "$ENV_FILE"
 
-install -m 644 "$SRC/deploy/okx-tr-bot.service" /etc/systemd/system/okx-tr-bot.service
+sed "s#^ExecStart=/usr/bin/python3 #ExecStart=$PY #" "$SRC/deploy/okx-tr-bot.service" > /etc/systemd/system/okx-tr-bot.service
+chmod 644 /etc/systemd/system/okx-tr-bot.service
 systemctl daemon-reload
 
-(cd "$APP" && python3 -c 'import okx_grid.live_bot') && echo "Kurulum tamam: $APP"
-echo "Sonraki adımlar: docs/LIVE_BOT.md (ayarlar, eski komut servisini durdurma, başlatma)."
+(cd "$APP" && "$PY" -c 'import okx_grid.live_bot') && echo "Kod kuruldu: $APP ($PY)"

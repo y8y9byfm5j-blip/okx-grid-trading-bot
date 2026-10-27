@@ -21,7 +21,8 @@ def main():
     required += ["tests/test_source_risk_regressions.py"]
     required += ["okx_grid/live_bot.py", "okx_grid/grid_manager.py", "okx_grid/tr_private.py", "okx_grid/tr_public.py",
                  "okx_grid/rotation.py", "okx_grid/early_long.py", "okx_grid/live_reports.py", "tests/test_live_bot.py",
-                 "deploy/install.sh", "deploy/okx-tr-bot.service", "docs/LIVE_BOT.md"]
+                 "deploy/install.sh", "deploy/okx-tr-bot.service", "docs/LIVE_BOT.md",
+                 "deploy/kur.sh", "okx_grid/setup_helper.py"]
     if any(not (ROOT / p).is_file() for p in required):
         print("Required validation or application file missing.", file=sys.stderr)
         return 1

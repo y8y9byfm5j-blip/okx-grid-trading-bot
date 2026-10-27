@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# Guided one-shot setup on the VPS:  sudo bash deploy/kur.sh
+# Installs the code, finds the existing bot's token, swaps the old Telegram
+# command service for the new one (test mode) and checks that it started.
+set -euo pipefail
+
+SRC="$(cd "$(dirname "$0")/.." && pwd)"
+APP=/opt/okx-tr-bot
+ENV_FILE=/etc/okx-tr-bot.env
+OLD=okx-telegram-commands.service
+NEW=okx-tr-bot.service
+
+say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+helper() { (cd "$APP" && "$(cat "$APP/PYTHON")" -m okx_grid.setup_helper "$@"); }
+value() { grep -E "^$1=" "$ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true; }
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Bu komutu sudo ile çalıştırın: sudo bash $0" >&2
+  exit 1
+fi
+
+say "OKX TR bot kurulumu (TEST modu: gerçek emir gönderilmez)"
+echo "Bu kurulum: kodu $APP içine kurar, eski Telegram komut servisini ($OLD) durdurur"
+echo "(silmez), yeni servisi ($NEW) aynı bot ile başlatır."
+read -r -p "Devam edilsin mi? (e/h): " ok
+case "$ok" in e|E|evet|Evet) ;; *) echo "İptal edildi."; exit 0 ;; esac
+
+say "1/5 Kod kuruluyor"
+bash "$SRC/deploy/install.sh"
+
+say "2/5 Bot token'ı"
+current="$(value TELEGRAM_BOT_TOKEN)"
+if [ -n "$current" ] && [ "$current" != "CHANGE_ME" ]; then
+  echo "Ayar dosyasında token zaten var."
+elif ! helper token-auto "$ENV_FILE"; then
+  helper token-ask "$ENV_FILE"
+fi
+
+say "3/5 Eski komut servisi durduruluyor (aynı token'ı yalnız bir program okuyabilir)"
+if systemctl list-unit-files "$OLD" >/dev/null 2>&1 && systemctl cat "$OLD" >/dev/null 2>&1; then
+  systemctl stop "$OLD" || true
+  systemctl disable "$OLD" >/dev/null 2>&1 || true
+  echo "$OLD durduruldu (geri almak için: sudo systemctl enable --now $OLD)."
+else
+  echo "$OLD bulunamadı, atlanıyor."
+fi
+systemctl stop "$NEW" >/dev/null 2>&1 || true
+
+say "4/5 Sohbet kimliği"
+chats="$(value TELEGRAM_ALLOWED_CHAT_IDS)"
+if [ -n "$chats" ] && [ "$chats" != "CHANGE_ME" ]; then
+  echo "Ayar dosyasında sohbet kimliği zaten var: $chats"
+else
+  helper chat-ask "$ENV_FILE"
+fi
+
+say "5/5 Yeni servis başlatılıyor"
+systemctl enable --now "$NEW"
+sleep 8
+if systemctl is-active --quiet "$NEW"; then
+  say "✅ KURULUM TAMAM"
+  echo "Telegram'a 'OKX TR bot başladı' mesajı gelmeli. /yardim yazın."
+  echo "Kayıtları izlemek için: sudo journalctl -u $NEW -f"
+  echo "Eski bota dönmek için: sudo systemctl disable --now $NEW && sudo systemctl enable --now $OLD"
+else
+  say "⚠️ Servis başlamadı. Aşağıdaki kayıtların ekran görüntüsünü gönderin:"
+  journalctl -u "$NEW" -n 30 --no-pager | grep -v -i token || true
+  exit 1
+fi

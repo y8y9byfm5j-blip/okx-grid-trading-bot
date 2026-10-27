@@ -447,3 +447,64 @@ class LiveBotTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SetupHelperTests(unittest.TestCase):
+    def test_token_discovery_env_writes_and_chat_capture(self):
+        from okx_grid import setup_helper
+        good, other = "123456789:" + "A" * 35, "987654321:" + "B" * 35
+
+        class Api:
+            def __init__(self, value=None, updates=None):
+                self.value, self.updates = value, updates or []
+
+            def call(self, method, body, timeout=20):
+                if method == "getMe":
+                    if self.value != good:
+                        raise TradingError("TELEGRAM_ERROR_401")
+                    return {"username": "okx_test_bot"}
+                return [u for u in self.updates if u["update_id"] >= body.get("offset", 0)]
+
+        texts = ["[Service]\nEnvironmentFile=-/nonexistent/env\nEnvironment=BOT=" + good,
+                 "x = '" + other + "'"]
+        self.assertEqual(setup_helper.find_tokens(texts), sorted([good, other]))
+        with tempfile.TemporaryDirectory() as d:
+            env = Path(d) / "bot.env"
+            env.write_text("TELEGRAM_BOT_TOKEN=CHANGE_ME\nGRID_EXECUTION=paper\n")
+            # Only the token Telegram accepts is used; it is never printed.
+            self.assertEqual(setup_helper.token_auto(env, texts, api_factory=Api), 0)
+            values = setup_helper.read_env(env)
+            self.assertEqual((values["TELEGRAM_BOT_TOKEN"], values["GRID_EXECUTION"]), (good, "paper"))
+            self.assertEqual(env.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(setup_helper.token_auto(env, ["nothing here"], api_factory=Api), 3)
+            answers = iter(["wrong", good])
+            self.assertEqual(setup_helper.token_ask(env, prompt=lambda _: next(answers), api_factory=Api), 0)
+            api = Api(updates=[{"update_id": 7, "message": {"text": "/start", "chat": {"id": 55, "first_name": "E"},
+                                                              "from": {"id": 1}}}])
+            api.updates.insert(0, {"update_id": 6, "message": {"text": "eski", "chat": {"id": 9}, "from": {"id": 1}}})
+            # The old message (6) is the starting point; only a newer /start is accepted.
+            api_calls = {"n": 0}
+            original = api.call
+
+            def staged(method, body, timeout=20):
+                api_calls["n"] += 1
+                if api_calls["n"] == 1:
+                    return [api.updates[0]]
+                return original(method, body, timeout)
+            api.call = staged
+            self.assertEqual(setup_helper.chat_ask(env, api=api, sleep=lambda s: None), 0)
+            self.assertEqual(setup_helper.read_env(env)["TELEGRAM_ALLOWED_CHAT_IDS"], "55")
+
+
+class RiskCommandTests(LiveBotTests):
+    def test_risk_command_updates_limits_and_survives_restart(self):
+        text = self.bot.handle(self.message("/risk 10"))
+        self.assertIn("10", text)
+        self.assertEqual(self.bot.grid.limits.risk_per_bot, Decimal(10))
+        cap = self.bot.profile.policy.equity * self.bot.profile.policy.risk_fraction
+        self.assertTrue(Decimal("9.99999999") < cap <= Decimal(10))
+        self.assertIn("geçersiz risk", self.bot.handle(self.message("/risk 50")))
+        self.assertIn("geçersiz risk", self.bot.handle(self.message("/risk abc")))
+        again = LiveBot(self.settings, telegram=FakeTelegram(), reader=reader({}), market=FakeMarket())
+        self.assertEqual(again.grid.limits.risk_per_bot, Decimal(10))
+        self.assertIn("10", again.handle(self.message("/risk")))
