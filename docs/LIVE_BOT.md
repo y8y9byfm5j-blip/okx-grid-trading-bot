@@ -56,33 +56,35 @@ düşürülmelidir. Bu karar size aittir; ayar `/etc/okx-tr-bot.env` içindedir.
 Stop-loss bir hedef fiyattır; ani düşüş/likidite boşluğunda gerçek zarar daha
 büyük olabilir.
 
-## Kurulum (Termius ile VPS'te) — 3 adım
+## Kurulum — ücretsiz, telefondan veya bilgisayardan (3 adım)
 
-Termius'ta sunucuya bağlanın. Aşağıdaki kutuları sırayla kopyalayıp yapıştırın.
+Termius gerekmez. DigitalOcean'ın tarayıcıdaki ücretsiz konsolu kullanılır.
 
-### Adım 1 — Sunucuya GitHub okuma anahtarı (bir kez)
+### Adım 1 — GitHub'da 7 günlük, salt okunur bir anahtar oluşturun
 
-```bash
-sudo ssh-keygen -t ed25519 -N "" -f /root/.ssh/okx_tr_bot_deploy -q; sudo cat /root/.ssh/okx_tr_bot_deploy.pub
-```
+1. Açın: https://github.com/settings/personal-access-tokens/new?name=VPS-okx-bot&description=Sunucu%20kurulumu%20salt%20okunur&expires_in=7&contents=read
+2. **Repository access** bölümünde **Only select repositories** seçin ve
+   `okx-grid-trading-bot` deposunu işaretleyin.
+3. **Permissions** bölümünde **Contents: Read-only** seçili olmalı (bağlantı bunu
+   önceden doldurur). Başka yetki eklemeyin.
+4. **Generate token** → çıkan `github_pat_...` anahtarını kopyalayın.
 
-Ekranda `ssh-ed25519 AAAA...` ile başlayan tek bir satır çıkar. Bu satırın tamamını
-kopyalayın. (Dosya zaten var diye sorarsa `n` yazıp Enter'a basın.)
+Bu anahtar yalnız bu depoyu okuyabilir ve 7 gün sonra kendiliğinden geçersiz olur.
 
-### Adım 2 — Anahtarı GitHub'a ekleyin (telefondan)
+### Adım 2 — DigitalOcean konsolunu açın
 
-1. Açın: https://github.com/y8y9byfm5j-blip/okx-grid-trading-bot/settings/keys/new
-2. **Title:** `VPS`
-3. **Key:** kopyaladığınız `ssh-ed25519 ...` satırı
-4. **Allow write access** kutusu **boş** kalsın → **Add key**
+https://cloud.digitalocean.com/droplets → droplet'iniz → **Access** sekmesi →
+**Launch Droplet Console** (kullanıcı: `root`). Tarayıcıda siyah bir terminal açılır.
 
-Bu anahtar sunucunun yalnız bu depoyu okumasına izin verir.
-
-### Adım 3 — Kur ve başlat (Termius)
+### Adım 3 — Bu satırı konsola yapıştırın ve Enter'a basın
 
 ```bash
-sudo rm -rf /root/okx-tr-bot-src; sudo env GIT_SSH_COMMAND="ssh -i /root/.ssh/okx_tr_bot_deploy -o StrictHostKeyChecking=accept-new" git clone -q -b claude/okx-tr-live-grid-bot git@github.com:y8y9byfm5j-blip/okx-grid-trading-bot.git /root/okx-tr-bot-src && sudo bash /root/okx-tr-bot-src/deploy/kur.sh
+read -rsp "GitHub anahtari: " T; echo; sudo rm -rf /root/okx-tr-bot-src; sudo git clone -q -b claude/okx-tr-live-grid-bot "https://y8y9byfm5j-blip:$T@github.com/y8y9byfm5j-blip/okx-grid-trading-bot.git" /root/okx-tr-bot-src && sudo git -C /root/okx-tr-bot-src remote set-url origin https://github.com/y8y9byfm5j-blip/okx-grid-trading-bot.git; unset T; sudo bash /root/okx-tr-bot-src/deploy/kur.sh
 ```
+
+"GitHub anahtari:" yazınca Adım 1'de kopyaladığınız anahtarı yapıştırıp Enter'a
+basın (ekranda görünmez, bu normal). Telefonda yapıştırma çalışmazsa aynı sayfayı
+bir bilgisayarın tarayıcısından açın.
 
 Kurulum sırasında:
 - "Devam edilsin mi?" → `e` yazıp Enter.
@@ -119,6 +121,7 @@ cd /opt/okx-tr-bot && sudo bash -c 'set -a; . /etc/okx-tr-bot.env; set +a; "$(ca
 ## Güncelleme ve geri dönüş
 
 Yeni sürüm için Adım 3'teki komutu tekrar çalıştırmanız yeterlidir; ayarlar korunur.
+Anahtarın süresi dolduysa Adım 1'den yeni bir anahtar oluşturun.
 
 Eski bota dönmek için:
 
