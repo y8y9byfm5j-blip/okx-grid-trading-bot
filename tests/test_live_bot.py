@@ -619,6 +619,38 @@ class ActionsRunTests(unittest.TestCase):
         with self.assertRaises(TradingError):
             Settings.from_env(dict(self.env, TELEGRAM_ALLOWED_CHAT_IDS=""))
 
+    def test_token_is_extracted_from_a_messy_secret_and_never_leaks_in_errors(self):
+        sample = "123456789:" + "A" * 35
+        for messy in (" " + sample + " \n", "Token: " + sample + " güvende tutun", "x\n" + sample):
+            settings = Settings.from_env({"TELEGRAM_BOT_TOKEN": messy, "TELEGRAM_ALLOWED_CHAT_IDS": "5"})
+            self.assertEqual(settings.bot_token, sample)
+        for bad in ("abc def", "not/a/token", "12345:short thing"):
+            with self.assertRaises(TradingError) as ctx:
+                Settings.from_env({"TELEGRAM_BOT_TOKEN": bad, "TELEGRAM_ALLOWED_CHAT_IDS": "5"})
+            self.assertEqual(ctx.exception.code, "TELEGRAM_BAD_AUTH_FORMAT")
+        import http.client
+        from okx_grid.live_bot import TelegramAPI
+
+        def broken(url, body, timeout):
+            raise http.client.InvalidURL("URL can't contain control characters. " + url)
+        with self.assertRaises(TradingError) as ctx:
+            TelegramAPI(sample, transport=broken).call("getUpdates", {})
+        self.assertEqual(ctx.exception.code, "TELEGRAM_UNAVAILABLE")
+        self.assertNotIn(sample, repr(ctx.exception) + str(ctx.exception.__cause__) + str(ctx.exception.__context__ or ""))
+
+    def test_rejected_token_stops_the_run_with_a_clear_message(self):
+        bot = self.bot()
+
+        class Revoked(FakeTelegram):
+            def updates(inner, offset, timeout=50):
+                raise TradingError("TELEGRAM_ERROR_401")
+        bot.telegram = Revoked()
+        ticks = iter(range(0, 10_000, 40))
+        with self.assertRaises(TradingError) as ctx:
+            self.run_mod.run({}, seconds=200, bot=bot, now=lambda: self.now[0], monotonic=lambda: next(ticks),
+                             sleep=lambda s: None)
+        self.assertEqual(ctx.exception.code, "TELEGRAM_ERROR_401")
+
     def test_missing_token_ends_green_without_running_anything(self):
         import io
         from contextlib import redirect_stdout

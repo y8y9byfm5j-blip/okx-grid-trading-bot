@@ -100,6 +100,8 @@ def run(env, *, seconds=240, bot=None, now=time.time, monotonic=time.monotonic, 
             try:
                 updates = bot.telegram.updates(offset, timeout=int(min(POLL_SECONDS, remaining - 2))) or []
             except TradingError as error:
+                if error.code in {"TELEGRAM_ERROR_401", "TELEGRAM_ERROR_404"}:
+                    raise  # the token is not accepted: say so instead of retrying silently
                 log.warning("getUpdates failed: %s", error.code)
                 sleep(5)
                 continue

@@ -7,9 +7,11 @@ calls OKX private endpoints; GRID_EXECUTION=live requires OKX TR API keys.
 """
 from dataclasses import dataclass, replace
 from decimal import ROUND_DOWN, Decimal
+import http.client
 import json
 import logging
 import os
+import re
 from pathlib import Path
 import ssl
 import threading
@@ -27,6 +29,7 @@ from .rotation import RotationTracker
 from .tr_public import TRPublic, coin_volumes
 
 log = logging.getLogger("okx_tr_bot")
+_BOT_AUTH_SHAPE = re.compile(r"\d{6,12}:[A-Za-z0-9_-]{30,64}")
 
 
 @dataclass(frozen=True)
@@ -67,7 +70,13 @@ class Settings:
             min_early = Decimal(env.get("EARLY_MIN_VOLUME_USDT", "1000000"))
         except (ArithmeticError, ValueError):
             raise TradingError("INVALID_GRID_SETTINGS") from None
-        return cls(bot_token=env["TELEGRAM_BOT_TOKEN"].strip(), allowed_chats=chats,
+        # A pasted secret may carry spaces, a newline or the whole BotFather message: use only the token.
+        raw = env["TELEGRAM_BOT_TOKEN"]
+        found = _BOT_AUTH_SHAPE.search(raw)
+        value = found.group(0) if found else raw.strip()
+        if not value or "/" in value or any(c.isspace() for c in value):
+            raise TradingError("TELEGRAM_BAD_AUTH_FORMAT")
+        return cls(bot_token=value, allowed_chats=chats,
                    allowed_users=ids("TELEGRAM_ALLOWED_USER_IDS"),
                    notify_chat=int(env.get("TELEGRAM_NOTIFY_CHAT_ID") or (sorted(chats)[0] if chats else 0)),
                    state_dir=Path(env.get("STATE_DIR", "/var/lib/okx-tr-bot")), execution=execution,
@@ -101,10 +110,15 @@ class TelegramAPI:
                 error.close()
 
     def call(self, method, body, timeout=20):
+        failed = False
         try:
             data = self._send(self._base + method, body, timeout)
-        except (URLError, TimeoutError, OSError, ValueError):
-            raise TradingError("TELEGRAM_UNAVAILABLE") from None
+        except (URLError, TimeoutError, OSError, ValueError, http.client.HTTPException):
+            failed = True
+        if failed:
+            # Raised outside the except block so no original error stays attached: its text can
+            # contain the request URL, and the URL holds the token.
+            raise TradingError("TELEGRAM_UNAVAILABLE")
         if not isinstance(data, dict) or not data.get("ok"):
             code = data.get("error_code") if isinstance(data, dict) else None
             raise TradingError(f"TELEGRAM_ERROR_{code}")
