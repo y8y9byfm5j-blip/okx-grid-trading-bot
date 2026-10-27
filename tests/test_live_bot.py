@@ -638,6 +638,18 @@ class ActionsRunTests(unittest.TestCase):
         self.assertEqual(ctx.exception.code, "TELEGRAM_UNAVAILABLE")
         self.assertNotIn(sample, repr(ctx.exception) + str(ctx.exception.__cause__) + str(ctx.exception.__context__ or ""))
 
+    def test_chat_id_secret_may_be_a_pasted_sentence(self):
+        base = {"TELEGRAM_BOT_TOKEN": "123456789:" + "A" * 35}
+        cases = {"5, 6": {5, 6}, " 123456789 \n": {123456789}, "-1001234567890": {-1001234567890},
+                 "Sohbet kimliğiniz: 123456789 (4. adım)": {123456789}}
+        for raw, expected in cases.items():
+            settings = Settings.from_env(dict(base, TELEGRAM_ALLOWED_CHAT_IDS=raw))
+            self.assertEqual(set(settings.allowed_chats), expected, raw)
+        for bad in ("CHANGE_ME", "sohbet kimliği yok"):
+            with self.assertRaises(TradingError) as ctx:
+                Settings.from_env(dict(base, TELEGRAM_ALLOWED_CHAT_IDS=bad))
+            self.assertEqual(ctx.exception.code, "INVALID_TELEGRAM_ALLOWED_CHAT_IDS")
+
     def test_rejected_token_stops_the_run_with_a_clear_message(self):
         bot = self.bot()
 

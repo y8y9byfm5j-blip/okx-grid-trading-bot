@@ -49,10 +49,18 @@ class Settings:
     @classmethod
     def from_env(cls, env, allow_unregistered=False):
         def ids(name):
-            try:
-                return frozenset(int(v) for v in env.get(name, "").replace(" ", "").split(",") if v)
-            except ValueError:
-                raise TradingError("INVALID_" + name) from None
+            raw = env.get(name, "")
+            if not raw.strip():
+                return frozenset()
+            # A plain list ("5, 6") is read as is; a pasted sentence ("Sohbet kimliğiniz: 123456789")
+            # only yields its long numbers, so words and small numbers around the ID are ignored.
+            if re.fullmatch(r"[\s,\d-]+", raw):
+                found = re.findall(r"-?\d+", raw)
+            else:
+                found = re.findall(r"-?\d{5,}", raw)
+            if not found:
+                raise TradingError("INVALID_" + name)
+            return frozenset(int(v) for v in found)
         chats = ids("TELEGRAM_ALLOWED_CHAT_IDS")
         if (env.get("TELEGRAM_BOT_TOKEN", "CHANGE_ME").strip() in {"", "CHANGE_ME"}
                 or not chats and not allow_unregistered):

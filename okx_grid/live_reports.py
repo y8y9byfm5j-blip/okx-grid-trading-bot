@@ -20,6 +20,8 @@ REASONS = {
     "PRIVATE_OUTCOME_UNKNOWN": "OKX yanıtı alınamadı; birkaç dakika sonra /botlar ile kontrol edin",
     "COMMAND_ARGUMENTS_REQUIRED": "coin adı yazın, ör. /analiz SOL", "INVALID_SPOT_SYMBOL": "geçersiz coin adı",
     "INVALID_RISK_VALUE": "geçersiz risk değeri (ör. /risk 10)",
+    "INVALID_TELEGRAM_ALLOWED_CHAT_IDS": "TELEGRAM_ALLOWED_CHAT_IDS içinde sohbet kimliği bulunamadı: yalnız sayıyı yazın (ör. 123456789)",
+    "INVALID_TELEGRAM_ALLOWED_USER_IDS": "TELEGRAM_ALLOWED_USER_IDS içinde sayı bulunamadı",
     "TELEGRAM_BAD_AUTH_FORMAT": "TELEGRAM_BOT_TOKEN biçimi geçersiz: yalnız BotFather'ın verdiği kodu yapıştırın",
     "TELEGRAM_ERROR_401": "Telegram token'ı kabul etmedi (yenilenmiş olabilir): BotFather'dan yeni token alıp GitHub secret'ını güncelleyin",
     "TELEGRAM_ERROR_404": "Telegram bu token'ı tanımıyor: GitHub secret'ını kontrol edin",
