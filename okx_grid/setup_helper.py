@@ -4,6 +4,7 @@ Commands (run as root, ENV is /etc/okx-tr-bot.env):
   token-auto ENV   find the existing bot's token in the old service files
   token-ask ENV    ask for the token with hidden input
   chat-ask ENV     wait for /start in Telegram and store the chat ID
+  old-units ENV    list systemd units / PIDs still running with the stored token
 Each validates with Telegram before writing and exits non-zero when it could not.
 """
 import getpass
@@ -37,9 +38,41 @@ def tree_files(root, limit=5000):
     return found
 
 
-def old_sources(service_text=None):
-    """Files and inline settings of the old bot that may hold its token."""
-    texts, paths = [], set()
+def process_sources(proc_root="/proc"):
+    """Environment and command line of running processes that carry a bot token.
+
+    The running old bot always holds its own token, even when its files are
+    elsewhere. Only token-shaped strings are used; nothing is printed.
+    """
+    sources, roots = [], set()
+    for pid in os.listdir(proc_root):
+        if not pid.isdigit() or int(pid) == os.getpid():
+            continue
+        try:
+            with open(os.path.join(proc_root, pid, "cmdline"), "rb") as handle:
+                argv = [a.decode(errors="ignore") for a in handle.read().split(b"\0") if a]
+        except OSError:
+            continue
+        try:
+            with open(os.path.join(proc_root, pid, "environ"), "rb") as handle:
+                env = handle.read().replace(b"\0", b"\n").decode(errors="ignore")
+        except OSError:
+            env = ""
+        label = "çalışan süreç " + pid + " (" + " ".join(os.path.basename(a) for a in argv[:2]) + ")"
+        text = env + "\n" + "\n".join(argv)
+        if BOT_AUTH_SHAPE.search(text):
+            sources.append((label, text))
+        if argv and "python" in os.path.basename(argv[0]) and re.search(r"(?i)okx|telegram|bot|grid", " ".join(argv)):
+            try:
+                roots.add(os.readlink(os.path.join(proc_root, pid, "cwd")))
+            except OSError:
+                pass
+    return sources, roots
+
+
+def old_sources(service_text=None, proc_root="/proc"):
+    """(where, text) pairs of the old bot's settings, files and running processes."""
+    sources, paths = [], set()
     if service_text is None:
         service_text = ""
         for name in OLD_SERVICES:
@@ -48,24 +81,65 @@ def old_sources(service_text=None):
                                                timeout=10).stdout
             except (OSError, subprocess.SubprocessError):
                 pass
-    texts.append(service_text)
+    sources.append(("eski servis tanımı", service_text))
     paths.update(m.group(1) for m in re.finditer(r"EnvironmentFile=-?(\S+)", service_text))
+    running, roots = process_sources(proc_root) if os.path.isdir(proc_root) else ([], set())
+    sources += running
     for pattern in OLD_GLOBS:
         paths.update(glob.glob(pattern))
-    for root in OLD_TREES:
+    for root in (*OLD_TREES, *sorted(r for r in roots if r not in {"/", "/root", "/home"})):
         paths.update(tree_files(root))
     for path in sorted(paths):
         try:
             if os.path.isfile(path) and os.path.getsize(path) <= 2_000_000:
                 with open(path, encoding="utf-8", errors="ignore") as handle:
-                    texts.append(handle.read())
+                    sources.append((path, handle.read()))
         except OSError:
             continue
-    return texts
+    return sources
 
 
 def find_tokens(texts):
     return sorted({m.group(1) for text in texts for m in BOT_AUTH_SHAPE.finditer(text)})
+
+
+def holders(value, proc_root="/proc"):
+    """systemd units (or bare PIDs) of running processes that hold this token."""
+    found = set()
+    # Only a complete, unique token may select processes; never a fragment.
+    if not isinstance(value, str) or not BOT_AUTH_SHAPE.fullmatch(value) or not os.path.isdir(proc_root):
+        return found
+    protected = {str(os.getpid())}
+    pid = os.getpid()
+    while pid > 1:  # never stop this setup run or the shell that started it
+        try:
+            with open(os.path.join("/proc", str(pid), "stat"), encoding="utf-8") as handle:
+                pid = int(handle.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, IndexError, ValueError):
+            break
+        protected.add(str(pid))
+    for pid in os.listdir(proc_root):
+        if not pid.isdigit() or pid in protected or pid == "1":
+            continue
+        try:
+            text = b""
+            for part in ("environ", "cmdline"):
+                with open(os.path.join(proc_root, pid, part), "rb") as handle:
+                    text += handle.read() + b"\0"
+        except OSError:
+            continue
+        if value.encode() not in text:
+            continue
+        unit = None
+        try:
+            with open(os.path.join(proc_root, pid, "cgroup"), encoding="utf-8", errors="ignore") as handle:
+                match = re.search(r"/([\w@.-]+\.service)\s*$", handle.read(), re.M)
+                unit = match.group(1) if match else None
+        except OSError:
+            pass
+        if unit != "okx-tr-bot.service":
+            found.add(unit or "pid:" + pid)
+    return found
 
 
 def set_env(path, key, value):
@@ -101,37 +175,63 @@ def read_env(path):
     return values
 
 
-def bot_name(value, api=None):
+def check_bot(value, api=None):
+    """(username, None) when Telegram accepts the token, else (None, error code)."""
     from .live_bot import TelegramAPI
     api = api if api is not None else TelegramAPI(value)
     try:
         result = api.call("getMe", {})
-    except TradingError:
-        return None
-    return (result or {}).get("username")
+    except TradingError as error:
+        return None, error.code
+    return (result or {}).get("username"), None
+
+
+def bot_name(value, api=None):
+    return check_bot(value, api)[0]
 
 
 def token_auto(env_path, texts=None, api_factory=None, choose=input):
-    found = []
-    for value in find_tokens(texts if texts is not None else old_sources()):
-        name = bot_name(value, api_factory(value) if api_factory else None)
+    sources = old_sources() if texts is None else [("?", t) for t in texts]
+    where = {}
+    for label, text in sources:
+        for match in BOT_AUTH_SHAPE.finditer(text):
+            where.setdefault(match.group(1), set()).add(label)
+    valid, unreachable = [], []
+    for value in sorted(where):
+        name, error = check_bot(value, api_factory(value) if api_factory else None)
         if name:
-            found.append((value, name))
-    if not found:
-        print("Eski botun ayarlarında çalışan bir bot token'ı bulunamadı.")
+            valid.append((value, name))
+        elif error not in {"TELEGRAM_ERROR_401", "TELEGRAM_ERROR_404"}:
+            unreachable.append((value, error))
+    if not valid and len(unreachable) == 1:
+        # The token exists but Telegram could not be reached from here right now.
+        set_env(env_path, "TELEGRAM_BOT_TOKEN", unreachable[0][0])
+        print("Token bulundu ve kaydedildi, ancak Telegram'a şu an ulaşılamadı (" + str(unreachable[0][1]) + ").")
+        print("Bulunduğu yer: " + ", ".join(sorted(where[unreachable[0][0]]))[:200])
+        return 0
+    if not valid:
+        print(f"Çalışan bir bot token'ı bulunamadı ({len(sources)} yere bakıldı, "
+              f"{len(where)} token biçimli değer, {len(unreachable)} doğrulanamayan).")
         return 3
-    pick = found[0]
-    if len(found) > 1:
+    pick = valid[0]
+    if len(valid) > 1:
         print("Sunucuda birden fazla bot bulundu:")
-        for i, (_, name) in enumerate(found, 1):
+        for i, (_, name) in enumerate(valid, 1):
             print(f"  {i}) @{name}")
         answer = choose("Komutları alacak botun numarasını yazın ve Enter'a basın: ").strip()
-        if not answer.isdigit() or not 1 <= int(answer) <= len(found):
+        if not answer.isdigit() or not 1 <= int(answer) <= len(valid):
             print("Geçersiz seçim.")
             return 3
-        pick = found[int(answer) - 1]
+        pick = valid[int(answer) - 1]
     set_env(env_path, "TELEGRAM_BOT_TOKEN", pick[0])
     print(f"Mevcut botun token'ı bulundu ve kaydedildi: @{pick[1]}")
+    print("Bulunduğu yer: " + ", ".join(sorted(where[pick[0]]))[:200])
+    return 0
+
+
+def old_units(env_path):
+    for target in sorted(holders(read_env(env_path).get("TELEGRAM_BOT_TOKEN", ""))):
+        print(target)
     return 0
 
 
@@ -181,7 +281,7 @@ def chat_ask(env_path, api=None, wait_seconds=180, sleep=time.sleep, clock=time.
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    commands = {"token-auto": token_auto, "token-ask": token_ask, "chat-ask": chat_ask}
+    commands = {"token-auto": token_auto, "token-ask": token_ask, "chat-ask": chat_ask, "old-units": old_units}
     if len(argv) != 2 or argv[0] not in commands:
         print(__doc__)
         return 2

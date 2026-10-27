@@ -36,15 +36,26 @@ elif ! helper token-auto "$ENV_FILE"; then
   helper token-ask "$ENV_FILE"
 fi
 
-say "3/5 Eski komut servisi durduruluyor (aynı token'ı yalnız bir program okuyabilir)"
-if systemctl list-unit-files "$OLD" >/dev/null 2>&1 && systemctl cat "$OLD" >/dev/null 2>&1; then
-  systemctl stop "$OLD" || true
-  systemctl disable "$OLD" >/dev/null 2>&1 || true
-  echo "$OLD durduruldu (geri almak için: sudo systemctl enable --now $OLD)."
-else
-  echo "$OLD bulunamadı, atlanıyor."
-fi
+say "3/5 Eski bot durduruluyor (aynı token'ı yalnız bir program okuyabilir)"
 systemctl stop "$NEW" >/dev/null 2>&1 || true
+targets="$( { systemctl cat "$OLD" >/dev/null 2>&1 && echo "$OLD"; helper old-units "$ENV_FILE"; } | sort -u )"
+if [ -z "$targets" ]; then
+  echo "Aynı token ile çalışan eski bir program bulunamadı."
+fi
+for target in $targets; do
+  case "$target" in
+    pid:*)
+      kill "${target#pid:}" 2>/dev/null && echo "Eski bot süreci durduruldu (PID ${target#pid:})." ;;
+    *)
+      if [ "$(systemctl show -p Type --value "$target" 2>/dev/null)" = "oneshot" ]; then
+        echo "$target zamanlanmış görev; dokunulmadı."
+        continue
+      fi
+      systemctl stop "$target" || true
+      systemctl disable "$target" >/dev/null 2>&1 || true
+      echo "$target durduruldu (geri almak için: sudo systemctl enable --now $target)." ;;
+  esac
+done
 
 say "4/5 Sohbet kimliği"
 chats="$(value TELEGRAM_ALLOWED_CHAT_IDS)"
@@ -57,6 +68,12 @@ fi
 say "5/5 Yeni servis başlatılıyor"
 systemctl enable --now "$NEW"
 sleep 8
+if journalctl -u "$NEW" -n 60 --no-pager 2>/dev/null | grep -q "TELEGRAM_ERROR_409"; then
+  say "⚠️ Başka bir program hâlâ aynı botu okuyor. Bu listenin ekran görüntüsünü gönderin:"
+  ps -eo pid,args | grep -i -E 'python|node|bot' | grep -v -E 'grep|okx_grid' \
+    | sed -E 's/[0-9]{6,12}:[A-Za-z0-9_-]{30,}/<token>/g' | head -n 15
+  exit 1
+fi
 if systemctl is-active --quiet "$NEW"; then
   say "✅ KURULUM TAMAM"
   echo "Telegram'a 'OKX TR bot başladı' mesajı gelmeli. /yardim yazın."

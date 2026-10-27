@@ -24,7 +24,7 @@ from .grid_manager import GridBotManager, GridLimits
 from .live_reports import (bots_text, decision_text, early_alert, early_text, event_text, help_text, reason,
                            rotation_text, usd)
 from .rotation import RotationTracker
-from .tr_public import TRPublic
+from .tr_public import TRPublic, coin_volumes
 
 log = logging.getLogger("okx_tr_bot")
 
@@ -225,8 +225,10 @@ class LiveBot:
             if name == "/analiz":
                 text += "\n\n" + self.coin_extras(instrument)
             return text
-        if name == "/botlar":
+        if name in {"/botlar", "/paper"}:
             return bots_text(self.grid.summary(), self.grid.closed())
+        if name == "/radar":
+            return self.radar_text()
         if name == "/durum":
             return self.status_text()
         if name == "/otomatik":
@@ -272,6 +274,23 @@ class LiveBot:
         report = self.market.capture(instrument, refresh=True)
         return decide(report, self.profile, self.planning, capital=str(self.grid.limits.bot_capital),
                       now_ms=self.market._now())
+
+    def radar_text(self, limit=3):
+        """Same V7 grid filters on the most traded USDT pairs; the scheduler rotates through the rest."""
+        coins = self.rotation.latest_coins or coin_volumes(self.reader.spot_tickers())[0]
+        floor = self.profile.policy.min_quote_volume
+        names = [c + "-USDT" for c, v in sorted(coins.items(), key=lambda kv: kv[1]["usdt_volume"], reverse=True)
+                 if v["usdt_volume"] >= floor][:limit]
+        lines = [f"📡 GRID RADARI — en hacimli {len(names)} coin (24s ≥ {usd(floor, signed=False)})"]
+        for instrument in names:
+            try:
+                decision = self.decide(instrument)
+                lines.append(("✅ " if decision["eligible"] else "⛔ ") + instrument + ": " +
+                             ("UYGUN" if decision["eligible"] else "; ".join(reason(r) for r in decision["reasons"][:2])))
+            except TradingError as error:
+                lines.append(f"⚠️ {instrument}: {reason(error.code)}")
+        lines.append("Otomatik tarama diğer coinleri 15 dakikada bir sırayla inceler. Ayrıntı: /grid COIN")
+        return "\n".join(lines)
 
     def coin_extras(self, instrument):
         coin = instrument.split("-")[0]

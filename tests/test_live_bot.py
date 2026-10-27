@@ -525,3 +525,53 @@ class RiskCommandTests(LiveBotTests):
         again = LiveBot(self.settings, telegram=FakeTelegram(), reader=reader({}), market=FakeMarket())
         self.assertEqual(again.grid.limits.risk_per_bot, Decimal(10))
         self.assertIn("10", again.handle(self.message("/risk")))
+
+
+class OldBotDiscoveryTests(unittest.TestCase):
+    def test_running_old_bot_token_and_its_unit_are_found(self):
+        from okx_grid import setup_helper
+        value = "123456789:" + "D" * 35
+        with tempfile.TemporaryDirectory() as d:
+            proc = Path(d) / "proc"
+            for pid, env, cmd, cgroup in (
+                    ("41", "HOME=/root\0BOT_TOKEN=" + value + "\0", "python3\0telegram_commands.py\0",
+                     "0::/system.slice/okx-telegram-commands.service\n"),
+                    ("42", "PATH=/usr/bin\0", "bash\0", "0::/user.slice/user-0.slice/session-1.scope\n"),
+                    ("43", "T=" + value + "\0", "python3\0bot.py\0", "0::/user.slice/user-0.slice/session-1.scope\n"),
+                    ("44", "T=" + value + "\0", "python3\0-m\0okx_grid.live_bot\0", "0::/system.slice/okx-tr-bot.service\n")):
+                (proc / pid).mkdir(parents=True)
+                (proc / pid / "environ").write_bytes(env.encode())
+                (proc / pid / "cmdline").write_bytes(cmd.encode())
+                (proc / pid / "cgroup").write_text(cgroup)
+            sources, _ = setup_helper.process_sources(str(proc))
+            self.assertEqual(setup_helper.find_tokens([t for _, t in sources]), [value])
+            self.assertIn("telegram_commands.py", sources[0][0])
+            self.assertEqual(setup_helper.holders(value, str(proc)), {"okx-telegram-commands.service", "pid:43"})
+            self.assertEqual(setup_helper.holders("", str(proc)), set())
+            self.assertEqual(setup_helper.holders("t:1", str(proc)), set())
+            self.assertEqual(setup_helper.holders(value[:20], str(proc)), set())
+
+    def test_unreachable_telegram_still_saves_a_single_found_token(self):
+        from okx_grid import setup_helper
+        value = "123456789:" + "E" * 35
+
+        class Down:
+            def __init__(self, v):
+                pass
+
+            def call(self, method, body, timeout=20):
+                raise TradingError("TELEGRAM_UNAVAILABLE")
+        with tempfile.TemporaryDirectory() as d:
+            env = Path(d) / "bot.env"
+            self.assertEqual(setup_helper.token_auto(env, ["x=" + value], api_factory=Down), 0)
+            self.assertEqual(setup_helper.read_env(env)["TELEGRAM_BOT_TOKEN"], value)
+
+
+class RadarAliasTests(LiveBotTests):
+    def test_radar_and_paper_aliases(self):
+        self.bot.rotation.latest_coins = {"SOL": {"usdt_volume": Decimal("5e7")}, "LOW": {"usdt_volume": Decimal("1")}}
+        text = self.bot.handle(self.message("/radar"))
+        self.assertIn("SOL-USDT", text)
+        self.assertNotIn("LOW-USDT", text)
+        self.assertIn("parite OKX TR'de yok", text)
+        self.assertIn("GRID BOTLARI", self.bot.handle(self.message("/paper")))
