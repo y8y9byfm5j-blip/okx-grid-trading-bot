@@ -5,6 +5,7 @@ from decimal import Decimal
 import hashlib
 import hmac
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -545,6 +546,14 @@ class OldBotDiscoveryTests(unittest.TestCase):
                 (proc / pid / "cgroup").write_text(cgroup)
             sources, _ = setup_helper.process_sources(str(proc))
             self.assertEqual(setup_helper.find_tokens([t for _, t in sources]), [value])
+            # A token glued to "bot" inside an API URL; a longer digit run is not a token.
+            self.assertEqual(setup_helper.find_tokens(["curl https://api.telegram.org/bot" + value + "/getMe"]), [value])
+            self.assertEqual(setup_helper.find_tokens(["9999999" + value]), [])
+            odd = Path(d) / "tree"
+            (odd / "cfg").mkdir(parents=True)
+            (odd / "cfg" / "telegram.token").write_text(value)
+            (odd / "cfg" / "big.bin").write_bytes(b"x" * 10)
+            self.assertEqual([os.path.basename(p) for p in setup_helper.tree_files(str(odd))], ["telegram.token"])
             self.assertIn("telegram_commands.py", sources[0][0])
             self.assertEqual(setup_helper.holders(value, str(proc)), {"okx-telegram-commands.service", "pid:43"})
             self.assertEqual(setup_helper.holders("", str(proc)), set())

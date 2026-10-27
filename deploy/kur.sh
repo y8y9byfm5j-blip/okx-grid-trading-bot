@@ -40,7 +40,11 @@ if [ -n "$current" ] && [ "$current" != "CHANGE_ME" ]; then
 elif ! helper token-auto "$ENV_FILE" </dev/null && [ "$AUTO" -eq 0 ]; then
   helper token-ask "$ENV_FILE"
 elif [ -z "$(value TELEGRAM_BOT_TOKEN)" ] || [ "$(value TELEGRAM_BOT_TOKEN)" = "CHANGE_ME" ]; then
-  echo "Token otomatik bulunamadı. 'bash deploy/kur.sh' ile (-y olmadan) tekrar çalıştırın."
+  echo "Token otomatik bulunamadı. Eski botun tanımı (gizli bilgiler silinmiş):"
+  { systemctl cat "$OLD"; ps -eo pid,user,args | grep -i -E 'python|node|bot' | grep -v -E 'grep|okx_grid|kur.sh|setup_helper'; } 2>&1 \
+    | sed -E 's/[0-9]{6,12}:[A-Za-z0-9_-]{30,}/<token>/g' | cut -c1-160 | head -n 30
+  echo "--- /opt/okx-grid-demo (yalnız dosya adları):"
+  ls -1 /opt/okx-grid-demo /opt/okx-grid-demo/v5 2>/dev/null | head -n 40
   exit 1
 fi
 

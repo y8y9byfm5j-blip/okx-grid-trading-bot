@@ -17,12 +17,16 @@ import time
 
 from .domain import TradingError
 
-BOT_AUTH_SHAPE = re.compile(r"(?<![\w:])(\d{6,12}:[A-Za-z0-9_-]{30,64})(?![\w-])")
+# Also matches a token glued to "bot" in an API URL (https://api.telegram.org/bot123:ABC/...).
+BOT_AUTH_SHAPE = re.compile(r"(?<![\d:])(\d{6,12}:[A-Za-z0-9_-]{30,64})(?![\w-])")
 OLD_SERVICES = ("okx-telegram-commands.service", "okx-grid-v5.service")
 OLD_GLOBS = ("/etc/okx-grid*", "/etc/systemd/system/okx*.service", "/root/.env", "/root/*.env")
 OLD_TREES = ("/opt/okx-grid-demo",)
 SKIP_PARTS = {".git", "site-packages", "venv", ".venv", "__pycache__", "node_modules", "state", "logs", "backups"}
-TEXT_SUFFIXES = {"", ".env", ".py", ".json", ".ini", ".conf", ".cfg", ".toml", ".yaml", ".yml", ".txt", ".sh"}
+# The old bot's own folder only: any file name, including odd ones such as "telegram.token".
+BINARY_SUFFIXES = {".so", ".pyc", ".gz", ".xz", ".zip", ".tar", ".png", ".jpg", ".db", ".sqlite", ".sqlite3",
+                   ".bin", ".deb", ".whl", ".log"}
+MAX_FILE_BYTES = 200_000
 
 
 def tree_files(root, limit=5000):
@@ -31,8 +35,14 @@ def tree_files(root, limit=5000):
     for directory, dirs, files in os.walk(root):
         dirs[:] = [d for d in dirs if d not in SKIP_PARTS]
         for name in files:
-            if name.startswith(".env") or os.path.splitext(name)[1] in TEXT_SUFFIXES:
-                found.append(os.path.join(directory, name))
+            path = os.path.join(directory, name)
+            try:
+                skip = (os.path.splitext(name)[1].lower() in BINARY_SUFFIXES or os.path.islink(path)
+                        or os.path.getsize(path) > MAX_FILE_BYTES)
+            except OSError:
+                skip = True
+            if not skip:
+                found.append(path)
                 if len(found) >= limit:
                     return found
     return found
