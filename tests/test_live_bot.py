@@ -650,6 +650,26 @@ class ActionsRunTests(unittest.TestCase):
                 Settings.from_env(dict(base, TELEGRAM_ALLOWED_CHAT_IDS=bad))
             self.assertEqual(ctx.exception.code, "INVALID_TELEGRAM_ALLOWED_CHAT_IDS")
 
+    def test_auth_hint_shows_sizes_only_and_getme_fails_fast(self):
+        sample = "123456789:" + "A" * 35
+        self.assertEqual(self.run_mod.auth_hint({"TELEGRAM_BOT_TOKEN": " " + sample}),
+                         "bot no 123456789, gizli kısım 35 karakter (35 olmalı)")
+        self.assertIn("34 karakter", self.run_mod.auth_hint({"TELEGRAM_BOT_TOKEN": sample[:-1]}))
+        self.assertIn("biçiminde değil", self.run_mod.auth_hint({"TELEGRAM_BOT_TOKEN": "abc"}))
+        self.assertNotIn("A" * 5, self.run_mod.auth_hint({"TELEGRAM_BOT_TOKEN": sample}))
+        bot = self.bot()
+        jobs = []
+
+        class Rejecting(FakeTelegram):
+            def call(inner, method, body, timeout=20):
+                raise TradingError("TELEGRAM_ERROR_401")
+        bot.telegram = Rejecting()
+        for name, _ in self.run_mod.JOBS:
+            setattr(bot, name, (lambda n: lambda: jobs.append(n))(name))
+        with self.assertRaises(TradingError):
+            self.run_mod.run({}, seconds=200, bot=bot, now=lambda: self.now[0], sleep=lambda s: None)
+        self.assertEqual(jobs, [])  # failed before any job ran
+
     def test_rejected_token_stops_the_run_with_a_clear_message(self):
         bot = self.bot()
 

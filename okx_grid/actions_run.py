@@ -8,6 +8,7 @@ placed from a runner, whatever the settings say.
 """
 import logging
 import os
+import re
 import sys
 import time
 
@@ -27,6 +28,14 @@ FIRST_START_TEXT = ("Merhaba! Sohbet kimliğiniz: {chat}\n"
                     "Actions → New repository secret ekranından şunu ekleyin:\n"
                     "Name: TELEGRAM_ALLOWED_CHAT_IDS\nSecret: {chat}\n"
                     "Ekledikten sonra birkaç dakika içinde komutlarınıza cevap verir.")
+
+
+def auth_hint(env):
+    """Size facts about the stored bot secret. Only the public bot number and a length are shown."""
+    found = re.search(r"(\d{6,12}):([A-Za-z0-9_-]+)", env.get("TELEGRAM_BOT_TOKEN", ""))
+    if not found:
+        return "değer 'sayı:harfler' biçiminde değil"
+    return f"bot no {found.group(1)}, gizli kısım {len(found.group(2))} karakter (35 olmalı)"
 
 
 def run_settings(env):
@@ -89,6 +98,9 @@ def run(env, *, seconds=240, bot=None, now=time.time, monotonic=time.monotonic, 
     answered, jobs_done = 0, []
     offset = bot.grid._meta("telegram_offset", 0)
     try:
+        identify = getattr(bot.telegram, "call", None)
+        if identify is not None:
+            identify("getMe", {})  # a wrong token fails here at once instead of after the first jobs
         while True:
             remaining = deadline - monotonic()
             if remaining <= 3:
@@ -127,6 +139,8 @@ def main():
             print("TELEGRAM_BOT_TOKEN henüz eklenmemiş; bekleniyor.")
             return 0
         print("Hata:", reason(error.code))
+        if error.code in {"TELEGRAM_ERROR_401", "TELEGRAM_ERROR_404"}:
+            print("Saklı değer:", auth_hint(os.environ))
         return 2
     print(f"tur tamam: {result['answered']} komut, {len(result['jobs'])} iş")
     return 0
