@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import tempfile
+import time
 import unittest
 
 from okx_grid.domain import TradingError
@@ -663,6 +664,7 @@ def h4_series():
 class CandleReader:
     def __init__(self, series, h4=None):
         self.series, self.h4 = series, h4 or h4_series()
+        self.fetched = []
 
     def spot_tickers(self):
         rows = [("SOL-USDT", "SOL", "USDT", 9e7), ("DEAD-USDT", "DEAD", "USDT", 10), ("USDC-USDT", "USDC", "USDT", 9e8),
@@ -670,7 +672,11 @@ class CandleReader:
         return [{"instrument": i, "base": b, "quote": q, "last": Decimal(150), "open_24h": Decimal(150),
                  "quote_volume_24h": Decimal(str(v)), "ts_ms": 1} for i, b, q, v in rows]
 
+    def last_price(self, instrument):
+        return Decimal(150)
+
     def candles(self, instrument, bar, limit=100):
+        self.fetched.append((instrument, bar))
         if instrument == "BTC-USDT":
             return daily([100] * 100)
         return self.series if bar == "1D" else self.h4
@@ -738,6 +744,61 @@ class RangeGridTests(unittest.TestCase):
             with self.assertRaises(TradingError) as ctx:
                 manager.open_from_decision(decision, enforce_risk=False)
             self.assertIn(ctx.exception.code, {"PAIR_ALREADY_ACTIVE", "DUPLICATE_DECISION"})
+
+
+class SpeedTests(unittest.TestCase):
+    def test_daily_bars_are_fetched_once_per_day_and_shared(self):
+        from okx_grid.range_grid import RangeGridScanner
+        from okx_grid.tr_public import CachedCandles
+        now = [10 * 86_400_000]
+        source = CandleReader(sideways_series())
+        cached = CachedCandles(source, lambda: now[0])
+        scanner = RangeGridScanner(cached)
+        scanner.scan()
+        daily_calls = [c for c in source.fetched if c[1] == "1D"]
+        self.assertEqual(sorted(daily_calls), [("BTC-USDT", "1D"), ("SOL-USDT", "1D")])
+        scanner.scan()  # hourly repeat: no daily request, only the 4H bars of the passing coin
+        self.assertEqual([c for c in source.fetched if c[1] == "1D"], daily_calls)
+        self.assertEqual(cached.spot_tickers()[0]["instrument"], "SOL-USDT")  # other calls pass through
+        self.assertEqual(len(cached.candles("SOL-USDT", "4H")), 120)
+        before = len(source.fetched)
+        cached.candles("SOL-USDT", "4H")
+        self.assertEqual(len(source.fetched), before + 1)  # 4H is never cached
+        now[0] += 86_400_000  # the next day refreshes
+        cached.candles("SOL-USDT", "1D")
+        self.assertEqual(len([c for c in source.fetched if c[1] == "1D"]), len(daily_calls) + 1)
+
+    def test_the_scan_uses_the_current_price_not_yesterdays_close(self):
+        from okx_grid import range_grid
+        series = sideways_series()
+        inside = range_grid.range_features(series, price=150)
+        self.assertEqual(range_grid.score(inside)[1], "GÜÇLÜ")
+        broke_out = range_grid.range_features(series, price=170)
+        self.assertEqual(range_grid.score(broke_out)[1], "UYMUYOR")
+        self.assertEqual(range_grid.score(range_grid.range_features(series, price=100))[1], "UYMUYOR")
+
+    def test_jobs_run_on_their_own_threads_and_report_their_duration(self):
+        import threading
+        bot = LiveBot(Settings.from_env({"TELEGRAM_BOT_TOKEN": "t:1", "TELEGRAM_ALLOWED_CHAT_IDS": "5",
+                                         "STATE_DIR": tempfile.mkdtemp()}),
+                      telegram=FakeTelegram(), reader=reader({}))
+        release, started = threading.Event(), []
+        bot.job_early = lambda: (started.append("early"), release.wait(5))  # a job that blocks
+        for name in ("job_rotation", "job_flows", "job_reconcile"):
+            setattr(bot, name, lambda n=name: started.append(n))
+        bot.job_grid = lambda: started.append("grid")
+        thread = threading.Thread(target=bot.scheduler, daemon=True)
+        bot.JOBS = tuple((n, e, 0) for n, e, _ in LiveBot.JOBS)
+        thread.start()
+        deadline = time.time() + 5
+        while len(set(started)) < 5 and time.time() < deadline:
+            time.sleep(0.02)
+        bot._stop.set()
+        release.set()
+        thread.join(2)
+        self.assertEqual(set(started), {"early", "job_rotation", "job_flows", "job_reconcile", "grid"})
+        self.assertIsNotNone(bot.grid._meta("took:job_grid"))
+        self.assertIn("sn sürdü", bot.status_text())
 
 
 class GridSignalBotTests(LiveBotTests):

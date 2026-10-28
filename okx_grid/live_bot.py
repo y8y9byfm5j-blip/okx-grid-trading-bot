@@ -27,7 +27,7 @@ from .live_reports import (bots_text, early_alert, early_text, event_text, help_
                            range_text, reason, rotation_text, usd, when)
 from .range_grid import STRONG as RANGE_STRONG, RangeGridScanner, signal_decision
 from .rotation import RotationTracker
-from .tr_public import TRPublic, coin_volumes
+from .tr_public import CachedCandles, TRPublic, coin_volumes
 
 log = logging.getLogger("okx_tr_bot")
 _BOT_AUTH_SHAPE = re.compile(r"\d{6,12}:[A-Za-z0-9_-]{30,64}")
@@ -149,7 +149,7 @@ class LiveBot:
         self.clock_ms = clock_ms if clock_ms is not None else lambda: time.time_ns() // 1_000_000
         settings.state_dir.mkdir(parents=True, exist_ok=True)
         self.telegram = telegram if telegram is not None else TelegramAPI(settings.bot_token)
-        self.reader = reader if reader is not None else TRPublic()
+        self.reader = CachedCandles(reader if reader is not None else TRPublic(), self.clock_ms)
         if settings.execution == "live" and private is None:
             from .tr_private import OKXTRPrivate
             private = OKXTRPrivate(settings.okx_access, settings.okx_signing, settings.okx_phrase)
@@ -302,6 +302,10 @@ class LiveBot:
             lines.append("💸 Para akışı verisi alınamadı.")
         return "\n".join(lines)
 
+    def took(self, job):
+        seconds = self.grid._meta("took:" + job)
+        return f" ({seconds:g} sn sürdü)" if seconds is not None else ""
+
     def status_text(self):
         summary = self.grid.summary()
         rng = self.last_range()
@@ -314,8 +318,8 @@ class LiveBot:
             f"Limitler: toplam {limits.total_capital} USDT, bot başı {limits.bot_capital}, en fazla {limits.max_bots} bot, "
             f"toplam zarar sınırı {limits.max_realized_loss} USDT",
             f"Açık bot: {len(summary['active'])} | kullanılan {summary['reserved']} USDT | K/Z {summary['realized_pnl']:.2f}",
-            f"Grid sinyali taraması: {when(rng['at_ms']) if rng else 'bekleniyor'}",
-            f"Para akışı: {when(flows_at) if flows_at else 'bekleniyor'} | Erken long: {when(scan['at_ms']) if scan else 'bekleniyor'}",
+            f"Grid sinyali taraması: {when(rng['at_ms']) if rng else 'bekleniyor'}" + self.took("job_grid"),
+            f"Para akışı: {when(flows_at) if flows_at else 'bekleniyor'} | Erken long: {when(scan['at_ms']) if scan else 'bekleniyor'}" + self.took("job_early"),
             "Kaynak: tr.okx.com"])
 
     # -- scheduled jobs ----------------------------------------------------------------
@@ -369,22 +373,30 @@ class LiveBot:
                 continue
             self.notify(event_text({"kind": "OPENED", "bot": bot}, self.s.execution))
 
-    def scheduler(self):
-        jobs = [(self.job_rotation, 15 * 60), (self.job_flows, 60 * 60), (self.job_early, 4 * 3600),
-                (self.job_reconcile, 2 * 60), (self.job_grid, 60 * 60)]
-        due = {job: 0.0 for job, _ in jobs}
-        due[self.job_grid] = time.monotonic() + 120  # first collect market-wide data
+    JOBS = (("job_rotation", 15 * 60, 0), ("job_flows", 60 * 60, 45), ("job_early", 4 * 3600, 0),
+            ("job_reconcile", 2 * 60, 0), ("job_grid", 60 * 60, 0))  # (method, seconds between runs, first delay)
+
+    def _job_loop(self, name, every, delay):
+        """One job on its own thread, so a slow job never holds up the others."""
+        job = getattr(self, name)
+        self._stop.wait(delay)
         while not self._stop.is_set():
-            for job, every in jobs:
-                if time.monotonic() >= due[job]:
-                    due[job] = time.monotonic() + every
-                    try:
-                        job()
-                    except TradingError as error:
-                        log.warning("%s failed: %s", job.__name__, error.code)
-                    except Exception:
-                        log.exception("%s failed", job.__name__)
-            self._stop.wait(5)
+            started = time.monotonic()
+            try:
+                job()
+            except TradingError as error:
+                log.warning("%s failed: %s", name, error.code)
+            except Exception:
+                log.exception("%s failed", name)
+            took = time.monotonic() - started
+            self.grid._set_meta("took:" + name, round(took, 1))
+            self._stop.wait(max(every - took, 1))
+
+    def scheduler(self):
+        threads = [threading.Thread(target=self._job_loop, args=job, name=job[0], daemon=True) for job in self.JOBS]
+        for thread in threads:
+            thread.start()
+        self._stop.wait()
 
     def poll(self):
         offset = self.grid._meta("telegram_offset", 0)

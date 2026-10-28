@@ -34,8 +34,10 @@ def _pct(value, digits=1):
     return ("+" if value > 0 else "−" if value < 0 else "") + f"{abs(value):.{digits}f}%".replace(".", ",")
 
 
-def range_features(daily):
-    """Daily pattern facts. daily: oldest-first bars (ts, o, h, l, c, base_vol, quote_vol, confirmed)."""
+def range_features(daily, price=None):
+    """Daily pattern facts. daily: oldest-first bars (ts, o, h, l, c, base_vol, quote_vol, confirmed).
+
+    price: the current price; the daily bars are confirmed days only, so without it the last close is used."""
     bars = [b for b in daily if b[7]]
     if len(bars) < 60:
         raise TradingError("INSUFFICIENT_DAILY_HISTORY")
@@ -47,6 +49,9 @@ def range_features(daily):
     if min(close) <= 0 or min(low) <= 0:
         raise TradingError("INVALID_PUBLIC_DATA")
     n = len(close)
+    now_price = float(price) if price is not None else close[-1]
+    if now_price <= 0:
+        raise TradingError("INVALID_PUBLIC_DATA")
     sma50 = _mean(close[-50:])
     best = None
     for k in RANGE_DAYS:
@@ -56,8 +61,8 @@ def range_features(daily):
         width = (top - bottom) / mid
         prior = close[n - k - 31:n - k - 1]
         runup = close[n - k - 1] / min(prior) - 1
-        drift = abs(close[-1] - close[n - k]) / (top - bottom) if top > bottom else 1.0
-        position = (close[-1] - bottom) / (top - bottom) if top > bottom else 0.5
+        drift = abs(now_price - close[n - k]) / (top - bottom) if top > bottom else 1.0
+        position = (now_price - bottom) / (top - bottom) if top > bottom else 0.5
         run_volume = _mean(quote[n - k - 15:n - k]) or 0.0
         range_volume = _mean(quote[window])
         recent_volume = _mean(quote[-3:])
@@ -75,8 +80,8 @@ def range_features(daily):
                  "range_quote_volume": range_volume,
                  "obv_share": obv / sum(base[window]) if sum(base[window]) > 0 else 0.0,
                  "up_share": up_volume / (up_volume + down_volume) if up_volume + down_volume > 0 else 0.5,
-                 "above_sma50": close[-1] / sma50 - 1, "close": close[-1],
-                 "ret_30d": close[-1] / close[-31] - 1}
+                 "above_sma50": now_price / sma50 - 1, "close": now_price,
+                 "ret_30d": now_price / close[-31] - 1}
         if gate(found) is None and best is None:
             best = found
         if best is None and k == RANGE_DAYS[-1]:
@@ -179,8 +184,10 @@ class RangeGridScanner:
         pairs.sort(key=lambda t: t["quote_volume_24h"], reverse=True)
         return [t["instrument"] for t in pairs[:self.max_coins]]
 
-    def analyze(self, instrument):
-        f = range_features(self.reader.candles(instrument, "1D", 100))
+    def analyze(self, instrument, price=None):
+        if price is None:
+            price = self.reader.last_price(instrument)
+        f = range_features(self.reader.candles(instrument, "1D", 100), price)
         points, label, reasons = score(f)
         row = {"instrument": instrument, "score": points, "label": label, "reasons": reasons,
                "price": f["close"], "k": f["k"], "width": f["width"], "runup": f["runup"],
@@ -196,15 +203,19 @@ class RangeGridScanner:
 
     def scan(self):
         results, errors = [], 0
-        for instrument in self.universe(self.reader.spot_tickers()):
+        tickers = self.reader.spot_tickers()
+        prices = {t["instrument"]: t["last"] for t in tickers}
+        started = time.monotonic()
+        for instrument in self.universe(tickers):
             try:
-                row = self.analyze(instrument)
+                row = self.analyze(instrument, prices[instrument])
             except (TradingError, ZeroDivisionError, ValueError):
                 errors += 1
                 continue
             results.append(row)
         results.sort(key=lambda r: r["score"], reverse=True)
-        self.last = {"at_ms": self.clock_ms(), "scanned": len(results), "errors": errors, "results": results}
+        self.last = {"at_ms": self.clock_ms(), "scanned": len(results), "errors": errors, "results": results,
+                     "seconds": round(time.monotonic() - started, 1)}
         return self.last
 
 

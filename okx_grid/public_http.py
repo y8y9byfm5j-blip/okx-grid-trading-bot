@@ -26,8 +26,8 @@ def _default_opener():
 
 class RequestPacer:
     """One process-wide conservative cap (4 GET/s); reuse across consumers."""
-    def __init__(self, *, clock=time.monotonic, sleep=time.sleep):
-        self.clock, self.sleep = clock, sleep
+    def __init__(self, *, clock=time.monotonic, sleep=time.sleep, interval=0.25):
+        self.clock, self.sleep, self.interval = clock, sleep, interval
         self._next = 0
         self._lock = threading.Lock()
 
@@ -36,7 +36,7 @@ class RequestPacer:
             delay = self._next - self.clock()
             if delay > 0:
                 self.sleep(delay)
-            self._next = self.clock() + 0.25
+            self._next = self.clock() + self.interval
 
 
 _SHARED_PACER = RequestPacer()

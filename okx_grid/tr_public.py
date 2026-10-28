@@ -7,6 +7,7 @@ GET only, fixed TR origin, bounded retries, shared pacing. No credentials.
 from decimal import Decimal, InvalidOperation
 import json
 import ssl
+import threading
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -28,6 +29,8 @@ STABLE = frozenset({"USDT", "USDC", "DAI", "FDUSD", "TUSD", "USDG", "PYUSD", "US
                     "EUR", "TRY", "BRL", "AUD", "AED", "PLN", "SGD", "USD", "RLUSD", "USD1", "USDS"})
 # rubik/stat is limited to 5 requests per 2 seconds per IP.
 _RUBIK_PACER = RequestPacer()
+# market data endpoints allow 20 requests per second per IP; 8 per second keeps a wide margin
+_MARKET_PACER = RequestPacer(interval=0.12)
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -80,7 +83,7 @@ class TRPublic:
     def __init__(self, *, transport=None, sleep=time.sleep, pacer=None, rubik_pacer=None):
         self._get = transport if transport is not None else urllib_transport()
         self._sleep = sleep
-        self._pacer = pacer if pacer is not None else _SHARED_PACER
+        self._pacer = pacer if pacer is not None else _MARKET_PACER
         self._rubik = rubik_pacer if rubik_pacer is not None else _RUBIK_PACER
 
     def _fetch(self, kind, params):
@@ -150,6 +153,36 @@ class TRPublic:
                 self._fetch("taker_volume", {"ccy": coin, "instType": "SPOT", "period": period})]
         rows.sort(key=lambda row: row[0])
         return rows
+
+
+class CachedCandles:
+    """Reader wrapper: daily bars are fetched once per trading day and shared by all scanners.
+
+    The daily bar only changes when a new day opens (OKX days open at 00:00 UTC+8), so repeating
+    the request every scan adds load and time but no information."""
+    DAY_MS = 86_400_000
+
+    def __init__(self, reader, clock_ms=None):
+        self._reader = reader
+        self._clock_ms = clock_ms if clock_ms is not None else lambda: time.time_ns() // 1_000_000
+        self._lock = threading.RLock()  # also queues concurrent scans so each coin is fetched once
+        self._day = None
+        self._cache = {}
+
+    def __getattr__(self, name):
+        return getattr(self._reader, name)
+
+    def candles(self, instrument, bar, limit=100):
+        if bar != "1D":
+            return self._reader.candles(instrument, bar, limit)
+        with self._lock:
+            day = (self._clock_ms() + 8 * 3_600_000) // self.DAY_MS
+            if day != self._day:
+                self._day, self._cache = day, {}
+            key = (instrument, limit)
+            if key not in self._cache:
+                self._cache[key] = self._reader.candles(instrument, bar, limit)
+            return self._cache[key]
 
 
 def usdt_try_rate(tickers):
