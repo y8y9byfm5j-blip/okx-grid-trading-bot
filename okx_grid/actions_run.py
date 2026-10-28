@@ -32,8 +32,11 @@ FIRST_START_TEXT = ("Merhaba! Sohbet kimliğiniz: {chat}\n"
 
 def auth_hint(env):
     """Size facts about the stored bot secret. Only the public bot number and a length are shown."""
-    found = re.search(r"(\d{6,12}):([A-Za-z0-9_-]+)", env.get("TELEGRAM_BOT_TOKEN", ""))
+    value = env.get("TELEGRAM_BOT_TOKEN", "")
+    found = re.search(r"(\d{6,12}):([A-Za-z0-9_-]+)", value)
     if not found:
+        if re.fullmatch(r"\s*-?\d+\s*", value):
+            return "içinde yalnız bir sayı var (sohbet kimliği olabilir): TELEGRAM_BOT_TOKEN'a BotFather'ın token'ı yazılmalı"
         return "değer 'sayı:harfler' biçiminde değil"
     return f"bot no {found.group(1)}, gizli kısım {len(found.group(2))} karakter (35 olmalı)"
 
@@ -41,6 +44,12 @@ def auth_hint(env):
 def run_settings(env):
     """Settings for a runner: unregistered chats allowed, execution forced to paper."""
     safe = dict(env)
+    # The two secrets are easy to swap by hand: a token in the chat-ID secret and a bare number in the
+    # token secret is repaired here instead of failing.
+    shape = re.compile(r"\d{6,12}:[A-Za-z0-9_-]{30,64}")
+    if not shape.search(safe.get("TELEGRAM_BOT_TOKEN", "")) and shape.search(safe.get("TELEGRAM_ALLOWED_CHAT_IDS", "")):
+        safe["TELEGRAM_BOT_TOKEN"], safe["TELEGRAM_ALLOWED_CHAT_IDS"] = (
+            safe["TELEGRAM_ALLOWED_CHAT_IDS"], safe.get("TELEGRAM_BOT_TOKEN", ""))
     safe["GRID_EXECUTION"] = "paper"
     safe.setdefault("STATE_DIR", os.path.join(env.get("RUNNER_TEMP", "/tmp"), "okx-tr-state"))
     for key in ("OKX_API_KEY", "OKX_API_SECRET", "OKX_API_PASSPHRASE"):

@@ -650,6 +650,16 @@ class ActionsRunTests(unittest.TestCase):
                 Settings.from_env(dict(base, TELEGRAM_ALLOWED_CHAT_IDS=bad))
             self.assertEqual(ctx.exception.code, "INVALID_TELEGRAM_ALLOWED_CHAT_IDS")
 
+    def test_swapped_secrets_are_repaired_and_a_bare_number_is_named(self):
+        sample = "123456789:" + "A" * 35
+        swapped = dict(self.env, TELEGRAM_BOT_TOKEN="987654321", TELEGRAM_ALLOWED_CHAT_IDS=sample)
+        settings = self.run_mod.run_settings(swapped)
+        self.assertEqual((settings.bot_token, set(settings.allowed_chats)), (sample, {987654321}))
+        ok = self.run_mod.run_settings(dict(self.env, TELEGRAM_BOT_TOKEN=sample, TELEGRAM_ALLOWED_CHAT_IDS="55555"))
+        self.assertEqual((ok.bot_token, set(ok.allowed_chats)), (sample, {55555}))
+        bare = " 987654321 "
+        self.assertIn("yalnız bir sayı", self.run_mod.auth_hint({"TELEGRAM_BOT_TOKEN": bare}))
+
     def test_auth_hint_shows_sizes_only_and_getme_fails_fast(self):
         sample = "123456789:" + "A" * 35
         self.assertEqual(self.run_mod.auth_hint({"TELEGRAM_BOT_TOKEN": " " + sample}),
