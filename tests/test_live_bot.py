@@ -529,6 +529,38 @@ class RiskCommandTests(LiveBotTests):
 
 
 class TypedEntryTests(unittest.TestCase):
+    def test_encrypted_delivery_roundtrip_and_server_step(self):
+        from okx_grid import delivery, setup_helper
+        good = "123456789:" + "F" * 35
+        blob = delivery.encrypt(delivery.build("x " + good + " y", "Sohbet 5555555"), "kedi4tuzu9")
+        self.assertNotIn("F" * 10, blob)
+        with self.assertRaises(TradingError):
+            delivery.encrypt("x", "short")
+        with self.assertRaises(TradingError):
+            delivery.build("no token", "5555555")
+
+        class Api:
+            def __init__(self, value):
+                self.value = value
+
+            def call(self, method, body, timeout=20):
+                if self.value != good:
+                    raise TradingError("TELEGRAM_ERROR_401")
+                return {"username": "okx_test_bot"}
+        with tempfile.TemporaryDirectory() as d:
+            env = Path(d) / "bot.env"
+            answers = iter(["yanlis-kod-1", "kedi4tuzu9"])
+            self.assertEqual(setup_helper.teslim(env, prompt=lambda _: next(answers), api_factory=Api, fetch=lambda: blob), 0)
+            saved = setup_helper.read_env(env)
+            self.assertEqual((saved["TELEGRAM_BOT_TOKEN"], saved["TELEGRAM_ALLOWED_CHAT_IDS"]), (good, "5555555"))
+            stale = delivery.encrypt(delivery.build("987654321:" + "B" * 35, "5555555"), "kedi4tuzu9")
+            self.assertEqual(setup_helper.teslim(env, prompt=lambda _: "kedi4tuzu9", api_factory=Api, fetch=lambda: stale), 3)
+            self.assertEqual(setup_helper.teslim(env, prompt=lambda _: "x", api_factory=Api, fetch=lambda: blob, attempts=2), 3)
+
+            def missing():
+                raise TradingError("DELIVERY_NOT_FOUND")
+            self.assertEqual(setup_helper.teslim(env, prompt=lambda _: "x", api_factory=Api, fetch=missing), 3)
+
     def test_token_and_chat_are_typed_validated_and_saved(self):
         from okx_grid import setup_helper
         good = "123456789:" + "F" * 35

@@ -7,6 +7,7 @@ Commands (run as root, ENV is /etc/okx-tr-bot.env):
   old-units ENV    list systemd units / PIDs still running with the stored token
   yaz-bot ENV      type the token by hand (no paste needed); add --yeniden to replace a stored one
   yaz-sohbet ENV   type the chat ID by hand; verified with a test message
+  teslim ENV       type the short delivery code; token and chat ID arrive encrypted from GitHub
 Each validates with Telegram before writing and exits non-zero when it could not.
 """
 import getpass
@@ -389,9 +390,38 @@ def chat_ask(env_path, api=None, wait_seconds=None, sleep=time.sleep, clock=time
     return 3
 
 
+def teslim(env_path, prompt=input, api_factory=None, fetch=None, attempts=4):
+    """Token and chat ID from the encrypted GitHub hand-over; only a short code is typed."""
+    from . import delivery
+    from .live_bot import TelegramAPI
+    try:
+        blob = (fetch or delivery.fetch)()
+    except TradingError:
+        print("Teslim dosyası bulunamadı. Asistanın 'teslim hazır' demesini bekleyin.")
+        return 3
+    factory = api_factory or TelegramAPI
+    for _ in range(attempts):
+        code = prompt("Teslim kodu: ").strip()
+        try:
+            values = delivery.decrypt(blob, code)
+        except TradingError:
+            print("Kod yanlış. GitHub'a secret olarak yazdığınız kodu aynen yazın.")
+            continue
+        value = values["TELEGRAM_BOT_TOKEN"]
+        name, error = check_bot(value, factory(value))
+        if error:
+            print("Telegram bu token'ı kabul etmedi (", error, "). BotFather'dan yeni token alıp GitHub secret'ını güncellemek gerekir.")
+            return 3
+        set_env(env_path, "TELEGRAM_BOT_TOKEN", value)
+        set_env(env_path, "TELEGRAM_ALLOWED_CHAT_IDS", values["TELEGRAM_ALLOWED_CHAT_IDS"])
+        print(f"Bot @{name} ve sohbet kimliği alındı.")
+        return 0
+    return 3
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    commands = {"token-auto": token_auto, "token-ask": token_ask, "chat-ask": chat_ask, "old-units": old_units,
+    commands = {"teslim": teslim, "token-auto": token_auto, "token-ask": token_ask, "chat-ask": chat_ask, "old-units": old_units,
                 "yaz-bot": token_type, "yaz-sohbet": chat_type}
     if not 2 <= len(argv) <= 3 or argv[0] not in commands or (len(argv) == 3 and argv[0] != "yaz-bot"):
         print(__doc__)
