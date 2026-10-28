@@ -6,7 +6,7 @@ getUpdates consumer for its bot token. GRID_EXECUTION=paper (default) never
 calls OKX private endpoints; GRID_EXECUTION=live requires OKX TR API keys.
 """
 from dataclasses import dataclass, replace
-from decimal import ROUND_DOWN, Decimal
+from decimal import Decimal
 import http.client
 import json
 import logging
@@ -23,8 +23,9 @@ from urllib.request import HTTPSHandler, Request, build_opener
 from .domain import TradingError
 from .early_long import STRONG, EarlyLongScanner, features, score
 from .grid_manager import GridBotManager, GridLimits
-from .live_reports import (bots_text, decision_text, early_alert, early_text, event_text, help_text, reason,
-                           rotation_text, usd)
+from .live_reports import (bots_text, early_alert, early_text, event_text, help_text, range_alert, range_analysis,
+                           range_text, reason, rotation_text, usd, when)
+from .range_grid import STRONG as RANGE_STRONG, RangeGridScanner, signal_decision
 from .rotation import RotationTracker
 from .tr_public import TRPublic, coin_volumes
 
@@ -142,33 +143,13 @@ class TelegramAPI:
                                       "disable_web_page_preview": True})
 
 
-def build_profile(limits):
-    """The agreed V7 rules with the owner's capital and risk limits."""
-    from .v7_core import load_v7
-    base = load_v7()
-    def fraction(value):  # the policy accepts at most 18 decimals; round toward the safer side
-        return min(value, Decimal(1)).quantize(Decimal("1e-18"), rounding=ROUND_DOWN)
-    policy = replace(base.policy, equity=limits.total_capital, max_bot_capital=limits.bot_capital,
-                     max_bots=limits.max_bots, risk_fraction=fraction(limits.risk_per_bot / limits.total_capital),
-                     total_risk_fraction=fraction(limits.risk_per_bot * limits.max_bots / limits.total_capital),
-                     max_realized_loss_fraction=fraction(limits.max_realized_loss / limits.total_capital))
-    return replace(base, name="okxtr-live-grid", policy=policy)
-
-
 class LiveBot:
-    def __init__(self, settings, *, telegram=None, reader=None, market=None, private=None, clock_ms=None):
+    def __init__(self, settings, *, telegram=None, reader=None, private=None, clock_ms=None):
         self.s = settings
         self.clock_ms = clock_ms if clock_ms is not None else lambda: time.time_ns() // 1_000_000
         settings.state_dir.mkdir(parents=True, exist_ok=True)
         self.telegram = telegram if telegram is not None else TelegramAPI(settings.bot_token)
         self.reader = reader if reader is not None else TRPublic()
-        self.profile = build_profile(settings.limits)
-        from .v7_decision import PlanningPolicy
-        self.planning = PlanningPolicy()
-        if market is None:
-            from .v7_market import V7MarketData
-            market = V7MarketData(self.profile.policy)
-        self.market = market
         if settings.execution == "live" and private is None:
             from .tr_private import OKXTRPrivate
             private = OKXTRPrivate(settings.okx_access, settings.okx_signing, settings.okx_phrase)
@@ -177,6 +158,7 @@ class LiveBot:
         self.rotation = RotationTracker(settings.state_dir / "market.sqlite3", self.reader, clock_ms=self.clock_ms)
         self.scanner = EarlyLongScanner(self.reader, rotation=self.rotation, min_volume=settings.min_early_volume,
                                         clock_ms=self.clock_ms)
+        self.range_scanner = RangeGridScanner(self.reader, min_volume=settings.min_early_volume, clock_ms=self.clock_ms)
         self._stop = threading.Event()
         override = self.grid._meta("risk_per_bot")
         if override is not None:
@@ -189,13 +171,16 @@ class LiveBot:
         """Latest early-long scan: this process's, else the one a previous run stored."""
         return self.scanner.last or self.grid._meta("early_scan")
 
+    def last_range(self):
+        """Latest grid-signal scan: this process's, else the one a previous run stored."""
+        return self.range_scanner.last or self.grid._meta("range_scan")
+
     def set_risk(self, value):
         """Per-bot planned stop loss, changed from Telegram; capped at 10% of a bot's capital."""
         limits = self.grid.limits
         if not value.is_finite() or not Decimal("0.5") <= value <= limits.bot_capital / 10:
             raise TradingError("INVALID_RISK_VALUE")
         limits = replace(limits, risk_per_bot=value)
-        self.profile = build_profile(limits)
         self.grid.limits = limits
         self.grid._set_meta("risk_per_bot", str(value))
 
@@ -249,15 +234,14 @@ class LiveBot:
             return early_text(self.last_scan())
         if name in {"/analiz", "/grid"}:
             instrument = self.pair(args)
-            decision = self.decide(instrument)
-            text = decision_text(decision, title="GRID PLANI" if name == "/grid" else "ANALİZ")
+            text = range_analysis(self.range_scanner.analyze(instrument))
             if name == "/analiz":
                 text += "\n\n" + self.coin_extras(instrument)
             return text
+        if name in {"/gridsinyal", "/sinyal", "/radar"}:
+            return range_text(self.last_range())
         if name in {"/botlar", "/paper"}:
             return bots_text(self.grid.summary(), self.grid.closed())
-        if name == "/radar":
-            return self.radar_text()
         if name == "/durum":
             return self.status_text()
         if name == "/otomatik":
@@ -298,29 +282,6 @@ class LiveBot:
             return "Durdurma kaldırıldı. Otomatik kurulum için /otomatik ac yazın."
         return "Bilinmeyen komut. /yardim yazın."
 
-    def decide(self, instrument):
-        from .v7_decision import decide
-        report = self.market.capture(instrument, refresh=True)
-        return decide(report, self.profile, self.planning, capital=str(self.grid.limits.bot_capital),
-                      now_ms=self.market._now())
-
-    def radar_text(self, limit=3):
-        """Same V7 grid filters on the most traded USDT pairs; the scheduler rotates through the rest."""
-        coins = self.rotation.coins() or coin_volumes(self.reader.spot_tickers())[0]
-        floor = self.profile.policy.min_quote_volume
-        names = [c + "-USDT" for c, v in sorted(coins.items(), key=lambda kv: kv[1]["usdt_volume"], reverse=True)
-                 if v["usdt_volume"] >= floor][:limit]
-        lines = [f"📡 GRID RADARI — en hacimli {len(names)} coin (24s ≥ {usd(floor, signed=False)})"]
-        for instrument in names:
-            try:
-                decision = self.decide(instrument)
-                lines.append(("✅ " if decision["eligible"] else "⛔ ") + instrument + ": " +
-                             ("UYGUN" if decision["eligible"] else "; ".join(reason(r) for r in decision["reasons"][:2])))
-            except TradingError as error:
-                lines.append(f"⚠️ {instrument}: {reason(error.code)}")
-        lines.append("Otomatik tarama diğer coinleri 15 dakikada bir sırayla inceler. Ayrıntı: /grid COIN")
-        return "\n".join(lines)
-
     def coin_extras(self, instrument):
         coin = instrument.split("-")[0]
         lines = []
@@ -343,18 +304,17 @@ class LiveBot:
 
     def status_text(self):
         summary = self.grid.summary()
-        health = self.market.last_health
+        rng = self.last_range()
         scan = self.last_scan()
         flows_at, _ = self.rotation.latest_flows()
         limits = self.grid.limits
-        from .live_reports import when
         return "\n".join([
             "ℹ️ DURUM", f"Mod: {'GERÇEK EMİR' if self.s.execution == 'live' else 'TEST (paper)'} | "
             f"otomatik {'AÇIK' if summary['auto'] else 'KAPALI'}" + (f" | DURDURULDU {summary['halt']}" if summary["halt"] else ""),
             f"Limitler: toplam {limits.total_capital} USDT, bot başı {limits.bot_capital}, en fazla {limits.max_bots} bot, "
-            f"bot başı risk {limits.risk_per_bot}, toplam zarar sınırı {limits.max_realized_loss} USDT",
+            f"toplam zarar sınırı {limits.max_realized_loss} USDT",
             f"Açık bot: {len(summary['active'])} | kullanılan {summary['reserved']} USDT | K/Z {summary['realized_pnl']:.2f}",
-            f"Son grid verisi: {health.get('data_status')} ({reason(health.get('reason', '')) if not health.get('ok') else 'tamam'})",
+            f"Grid sinyali taraması: {when(rng['at_ms']) if rng else 'bekleniyor'}",
             f"Para akışı: {when(flows_at) if flows_at else 'bekleniyor'} | Erken long: {when(scan['at_ms']) if scan else 'bekleniyor'}",
             "Kaynak: tr.okx.com"])
 
@@ -383,41 +343,35 @@ class LiveBot:
             self.notify(event_text(event, self.s.execution))
 
     def job_grid(self):
-        if not self.grid.auto_enabled() or self.grid.halted():
-            return
-        if len(self.grid.active()) >= self.grid.limits.max_bots:
-            return
-        coins = self.rotation.coins()
-        floor = self.profile.policy.min_quote_volume
-        names = sorted((c + "-USDT" for c, v in coins.items() if v["usdt_volume"] >= floor),
-                       key=lambda n: coins[n[:-5]]["usdt_volume"], reverse=True)
-        if not names:
-            return
-        offset = self.grid._meta("grid_offset", 0) % len(names)
-        batch = (names[offset:] + names[:offset])[:3]
-        self.grid._set_meta("grid_offset", (offset + len(batch)) % len(names))
-        for instrument in batch:
-            if self.grid.blocking_reasons(instrument):
-                continue
-            try:
-                decision = self.decide(instrument)
-                if not decision["eligible"]:
-                    continue
-                bot = self.grid.open_from_decision(decision)
-                self.notify(event_text({"kind": "OPENED", "bot": bot}, self.s.execution))
-            except TradingError as error:
-                if error.code == "PRIVATE_OUTCOME_UNKNOWN":
-                    self.notify(f"⚠️ {instrument} için OKX yanıtı alınamadı; birkaç dakika içinde doğrulanacak.")
-                    return
-                if error.code.startswith(("OKX_", "INSUFFICIENT_USDT")):
-                    self.notify(f"⚠️ {instrument} grid kurulamadı: {reason(error.code)}")
-                continue
+        """Grid signals: coins that rose, went sideways and cool in volume. No balance or loss check here."""
+        scan = self.range_scanner.scan()
+        self.grid._set_meta("range_scan", {**scan, "results": [r for r in scan["results"] if r["label"] != "UYMUYOR"][:30]})
+        now = self.clock_ms()
+        strong = [r for r in scan["results"] if r["score"] >= RANGE_STRONG]
+        sent = self.grid._meta("range_alerts", {})
+        auto = self.s.execution == "paper" and self.grid.auto_enabled() and not self.grid.halted()
+        for row in strong:
+            if now - sent.get(row["instrument"], 0) > 2 * 86_400_000:
+                self.notify(range_alert(row, auto))
+                sent[row["instrument"]] = now
+        self.grid._set_meta("range_alerts", {k: v for k, v in sent.items() if now - v < 4 * 86_400_000})
+        if not auto:
+            return  # signals only: bots open in paper mode; real orders need the OKX decision path
+        for row in strong:
             if len(self.grid.active()) >= self.grid.limits.max_bots:
                 return
+            if self.grid.blocking_reasons(row["instrument"]):
+                continue
+            try:
+                bot = self.grid.open_from_decision(
+                    signal_decision(row, self.grid.limits.bot_capital, now), enforce_risk=False)
+            except TradingError:
+                continue
+            self.notify(event_text({"kind": "OPENED", "bot": bot}, self.s.execution))
 
     def scheduler(self):
         jobs = [(self.job_rotation, 15 * 60), (self.job_flows, 60 * 60), (self.job_early, 4 * 3600),
-                (self.job_reconcile, 2 * 60), (self.job_grid, 15 * 60)]
+                (self.job_reconcile, 2 * 60), (self.job_grid, 60 * 60)]
         due = {job: 0.0 for job, _ in jobs}
         due[self.job_grid] = time.monotonic() + 120  # first collect market-wide data
         while not self._stop.is_set():

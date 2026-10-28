@@ -7,7 +7,8 @@ Bu servis mevcut Telegram botunun token'ıyla çalışır ve şunları yapar:
 | `/rotasyon` | Ana para takibi: son 24 saatte hangi coinlerde net agresif alış/satış var, para hangi coinden çıkıp hangisine gidiyor, USDT ↔ coin yönü, hacim payı değişimi, TRY paritelerinde (Türk tarafı) payı artanlar |
 | `/erkenlong` | Büyük yükseliş öncesi birikim adayları (günlük + haftalık): hafif yükseliş, hacim artışı, OBV birikimi, volatilite sıkışması, trend dönüşü, yükselen haftalık dipler, BTC'den güç, agresif alıcı baskınlığı. Çok yükselmiş coinler "geç kalındı" diye elenir. |
 | `/analiz COIN` | Tek coin: grid kriterleri (V7 kuralları), erken long skoru, 24s para akışı |
-| `/grid COIN` | Bu coin için kurulacak grid planı (alt/üst fiyat, grid sayısı, stop, kâr al) |
+| `/gridsinyal` (`/radar`) | Yükselip yataya geçen, hacmi soğuyan coinler ve grid aralıkları |
+| `/grid COIN` | O coin için grid sinyali: uygun mu, alt/üst fiyat, grid sayısı, tahmini günlük getiri |
 | `/botlar` | Açık ve kapanan grid botları, kullanılan sermaye, gerçekleşen kâr/zarar |
 | `/durum` | Mod, limitler, son veri zamanları |
 | `/otomatik ac` / `/otomatik kapat` | Otomatik grid kurulumu |
@@ -27,10 +28,17 @@ kurulan/kapanan grid botları, zarar sınırı.
 - **Para akışı:** OKX'in coin bazında toplu agresif alış/satış hacmi (taker volume)
   ve 24 saatlik hacim payı. Bunlar gerçekleşen işlemlerdir; müşteri bakiyesi veya
   borsaya giren para değildir.
-- **Grid kararı:** daha önce kabul edilen V7 kuralları değişmeden kullanılır:
-  10M USDT hacim, spread ≤ 10 bps, 400+400 emir defteri, ±%0,5 derinlik,
-  15dk/1s/4s trend, BTC rejimi, komisyon sonrası net grid kârı ve risk sınırı.
-  Her 15 dakikada en fazla 3 coin incelenir; uygun olan olursa grid botu kurulur.
+- **Grid sinyali:** saatte bir, 1M USDT üstü hacimli USDT paritelerinde aranır. Bakiye veya
+  zarar limiti aramaya karışmaz; yalnız piyasa verisi okunur. Aranan örüntü:
+  1. öncesinde son 30 günde en az %20 yükseliş,
+  2. trend bozulmamış (fiyat 50 günlük ortalamanın altına düşmemiş),
+  3. 7-14 günlük, %4-20 genişlikte yatay bant ve bandın içinde fiyat,
+  4. hacim ölçümü: bantta hacim yükselişin %25-105'i (soğuyor ama canlı), son 3 gün dengeli,
+     OBV düşmüyor, alış hacmi satışa denk.
+  Grid aralığı bandın kendisidir; grid sayısı adım komisyonu (%0,2) karşılayacak şekilde seçilir.
+  Skor 70 ve üstü "GÜÇLÜ" sinyal olarak Telegram'a yazılır (aynı coine 2 günde bir). TEST modunda
+  otomatik açıksa sinyalden test botu açılır; toplam zarar sınırı yine de otomasyonu durdurur.
+  Gerçek emir modunda şimdilik yalnız sinyal gönderilir.
 - **Grid botu:** OKX TR'nin kendi Spot Grid botu (`tradingBot/grid`) kurulur:
   aritmetik grid, yatırım USDT, stop-loss ve kâr al tetikleri OKX'te tanımlı olur.
   Servis kapansa bile stop/kâr al OKX tarafında çalışır.

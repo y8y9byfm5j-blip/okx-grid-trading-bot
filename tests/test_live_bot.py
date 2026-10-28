@@ -13,7 +13,7 @@ import unittest
 from okx_grid.domain import TradingError
 from okx_grid.early_long import EarlyLongScanner, features, score
 from okx_grid.grid_manager import GridBotManager, GridLimits, okx_grid_params
-from okx_grid.live_bot import LiveBot, Settings, build_profile
+from okx_grid.live_bot import LiveBot, Settings
 from okx_grid.live_reports import bots_text, early_text, rotation_text
 from okx_grid.rotation import RotationTracker
 from okx_grid.tr_private import OKXTRPrivate, OutcomeUnknown
@@ -371,19 +371,13 @@ class FakeTelegram:
         self.sent.append((chat, text))
 
 
-class FakeMarket:
-    last_health = {"ok": False, "data_status": "DATA_UNVERIFIED", "reason": "NOT_CHECKED"}
-
-    def capture(self, instrument, refresh=False):
-        raise TradingError("UNKNOWN_SYMBOL")
-
 
 class LiveBotTests(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         env = {"TELEGRAM_BOT_TOKEN": "t:1", "TELEGRAM_ALLOWED_CHAT_IDS": "5, 6", "STATE_DIR": self.dir.name}
         self.settings = Settings.from_env(env)
-        self.bot = LiveBot(self.settings, telegram=FakeTelegram(), reader=reader({}), market=FakeMarket())
+        self.bot = LiveBot(self.settings, telegram=FakeTelegram(), reader=reader({}))
 
     def tearDown(self):
         self.dir.cleanup()
@@ -418,11 +412,6 @@ class LiveBotTests(unittest.TestCase):
         with self.assertRaises(TradingError):
             Settings.from_env({"TELEGRAM_BOT_TOKEN": "t:1", "TELEGRAM_ALLOWED_CHAT_IDS": "5", "GRID_MAX_BOTS": "two"})
 
-    def test_profile_uses_owner_limits(self):
-        policy = build_profile(GridLimits()).policy
-        self.assertEqual((policy.equity, policy.max_bot_capital, policy.max_bots), (Decimal(600), Decimal(300), 2))
-        self.assertEqual(policy.equity * policy.risk_fraction, Decimal(3))
-
     def test_acl_and_commands(self):
         self.assertTrue(self.bot.allowed(self.message("/durum")))
         self.assertFalse(self.bot.allowed(self.message("/durum", chat=7)))
@@ -431,7 +420,6 @@ class LiveBotTests(unittest.TestCase):
         self.assertIn("TEST", self.bot.handle(self.message("/durum")))
         self.assertIn("KAPALI", self.bot.handle(self.message("/otomatik kapat")))
         self.assertFalse(self.bot.grid.auto_enabled())
-        self.assertIn("parite OKX TR'de yok", self.bot.handle(self.message("/grid sol")))
         self.assertIn("Açık bot yok", self.bot.handle(self.message("/botlar")))
         self.assertIn("ACİL", self.bot.handle(self.message("/acil_durdur")))
         self.assertIn("/devam", self.bot.handle(self.message("/otomatik ac")))
@@ -519,11 +507,9 @@ class RiskCommandTests(LiveBotTests):
         text = self.bot.handle(self.message("/risk 10"))
         self.assertIn("10", text)
         self.assertEqual(self.bot.grid.limits.risk_per_bot, Decimal(10))
-        cap = self.bot.profile.policy.equity * self.bot.profile.policy.risk_fraction
-        self.assertTrue(Decimal("9.99999999") < cap <= Decimal(10))
         self.assertIn("geçersiz risk", self.bot.handle(self.message("/risk 50")))
         self.assertIn("geçersiz risk", self.bot.handle(self.message("/risk abc")))
-        again = LiveBot(self.settings, telegram=FakeTelegram(), reader=reader({}), market=FakeMarket())
+        again = LiveBot(self.settings, telegram=FakeTelegram(), reader=reader({}))
         self.assertEqual(again.grid.limits.risk_per_bot, Decimal(10))
         self.assertIn("10", again.handle(self.message("/risk")))
 
@@ -660,14 +646,132 @@ class OldBotDiscoveryTests(unittest.TestCase):
             self.assertEqual(setup_helper.read_env(env)["TELEGRAM_BOT_TOKEN"], value)
 
 
-class RadarAliasTests(LiveBotTests):
-    def test_radar_and_paper_aliases(self):
-        self.bot.rotation.latest_coins = {"SOL": {"usdt_volume": Decimal("5e7")}, "LOW": {"usdt_volume": Decimal("1")}}
-        text = self.bot.handle(self.message("/radar"))
-        self.assertIn("SOL-USDT", text)
-        self.assertNotIn("LOW-USDT", text)
-        self.assertIn("parite OKX TR'de yok", text)
+def sideways_series(closes_tail=None, tail_volume=4000):
+    """100 daily bars: flat, a run-up from 100 to 150, then 20 days sideways around 150."""
+    import math
+    closes = [100] * 50 + [100 + 50 * (i + 1) / 30 for i in range(30)]
+    closes += closes_tail or [150 + 4 * math.sin(i * 0.9) for i in range(20)]
+    volumes = [2000] * 50 + [6000] * 30 + [tail_volume] * (len(closes) - 80)
+    return daily(closes, volumes)
+
+
+def h4_series():
+    import math
+    return daily([150 + 4 * math.sin(i * 0.8) for i in range(120)])
+
+
+class CandleReader:
+    def __init__(self, series, h4=None):
+        self.series, self.h4 = series, h4 or h4_series()
+
+    def spot_tickers(self):
+        rows = [("SOL-USDT", "SOL", "USDT", 9e7), ("DEAD-USDT", "DEAD", "USDT", 10), ("USDC-USDT", "USDC", "USDT", 9e8),
+                ("BTC-USDT", "BTC", "USDT", 5e8)]
+        return [{"instrument": i, "base": b, "quote": q, "last": Decimal(150), "open_24h": Decimal(150),
+                 "quote_volume_24h": Decimal(str(v)), "ts_ms": 1} for i, b, q, v in rows]
+
+    def candles(self, instrument, bar, limit=100):
+        if instrument == "BTC-USDT":
+            return daily([100] * 100)
+        return self.series if bar == "1D" else self.h4
+
+
+class RangeGridTests(unittest.TestCase):
+    def test_uptrend_then_sideways_with_cooling_volume_is_a_signal(self):
+        from okx_grid import range_grid
+        f = range_grid.range_features(sideways_series())
+        self.assertIsNone(range_grid.gate(f))
+        points, label, reasons = range_grid.score(f)
+        self.assertEqual(label, "GÜÇLÜ")
+        self.assertGreaterEqual(points, 70)
+        self.assertTrue(any("hacim soğuyor" in r for r in reasons))
+        plan = range_grid.grid_plan(f, h4_series())
+        self.assertGreaterEqual(plan["grids"], 3)
+        self.assertGreater(plan["step_net_pct"], 0)
+        self.assertGreater(plan["crossings"], 4)
+        self.assertGreater(plan["est_daily_pct"], 0)
+        self.assertLess(plan["stop"], plan["lower"])
+        self.assertGreater(plan["take_profit"], plan["upper"])
+
+    def test_missing_pieces_are_rejected_with_a_reason(self):
+        from okx_grid import range_grid
+        import math
+        flat = range_grid.range_features(daily([100 + 2 * math.sin(i) for i in range(100)], [4000] * 100))
+        self.assertIn("yükseliş yok", range_grid.score(flat)[2][0])
+        # volume exploding in the range: not a cooling range
+        loud = range_grid.range_features(sideways_series(tail_volume=30000))
+        self.assertIn("hacim", range_grid.score(loud)[2][0])
+        # volume dried up
+        dead = range_grid.range_features(sideways_series(tail_volume=100))
+        self.assertIn("zayıfladı", range_grid.score(dead)[2][0])
+        # still climbing inside the window: trending, not sideways
+        climbing = range_grid.range_features(sideways_series([150 + i * 1.5 for i in range(20)]))
+        self.assertEqual(range_grid.score(climbing)[1], "UYMUYOR")
+        # fell below the 50 day average
+        broken = range_grid.range_features(sideways_series([150 - i * 3 for i in range(20)]))
+        self.assertEqual(range_grid.score(broken)[1], "UYMUYOR")
+        with self.assertRaises(TradingError):
+            range_grid.range_features(daily([100] * 30))
+
+    def test_scanner_filters_the_universe_and_ranks(self):
+        from okx_grid.range_grid import RangeGridScanner
+        scanner = RangeGridScanner(CandleReader(sideways_series()), clock_ms=lambda: 5)
+        self.assertEqual(scanner.universe(scanner.reader.spot_tickers()), ["BTC-USDT", "SOL-USDT"])
+        scan = scanner.scan()
+        names = {r["instrument"]: r for r in scan["results"]}
+        self.assertEqual(names["SOL-USDT"]["label"], "GÜÇLÜ")
+        self.assertEqual(names["BTC-USDT"]["label"], "UYMUYOR")
+        self.assertEqual(scan["results"][0]["instrument"], "SOL-USDT")
+
+    def test_signal_bot_ignores_the_risk_limit_but_not_the_slots(self):
+        from okx_grid.range_grid import RangeGridScanner, signal_decision
+        row = RangeGridScanner(CandleReader(sideways_series())).analyze("SOL-USDT")
+        with tempfile.TemporaryDirectory() as d:
+            manager = GridBotManager(Path(d) / "g.sqlite3", clock_ms=lambda: 7_200_000, price=lambda i: Decimal(150))
+            decision = signal_decision(row, manager.limits.bot_capital, 7_200_000)
+            self.assertGreater(Decimal(decision["planned_loss_usdt"]), manager.limits.risk_per_bot)
+            with self.assertRaises(TradingError) as ctx:
+                manager.open_from_decision(decision)
+            self.assertEqual(ctx.exception.code, "BOT_RISK_LIMIT")
+            bot = manager.open_from_decision(decision, enforce_risk=False)
+            self.assertEqual((bot["instrument"], bot["state"]), ("SOL-USDT", "RUNNING"))
+            with self.assertRaises(TradingError) as ctx:
+                manager.open_from_decision(decision, enforce_risk=False)
+            self.assertIn(ctx.exception.code, {"PAIR_ALREADY_ACTIVE", "DUPLICATE_DECISION"})
+
+
+class GridSignalBotTests(LiveBotTests):
+    def setUp(self):
+        super().setUp()
+        from okx_grid.range_grid import RangeGridScanner
+        self.bot.range_scanner = RangeGridScanner(CandleReader(sideways_series()), clock_ms=self.bot.clock_ms)
+
+    def test_commands_show_the_signal_and_the_reason_it_fails(self):
+        self.assertIn("henüz tamamlanmadı", self.bot.handle(self.message("/gridsinyal")))
+        text = self.bot.handle(self.message("/grid sol"))
+        self.assertIn("Grid aralığı", text)
+        self.assertIn("GÜÇLÜ", text)
+        self.assertIn("Uygun değil", self.bot.handle(self.message("/grid btc")))
         self.assertIn("GRID BOTLARI", self.bot.handle(self.message("/paper")))
+
+    def test_job_alerts_once_and_opens_a_paper_bot_without_balance_or_loss_checks(self):
+        self.bot.job_grid()
+        sent = [text for _, text in self.bot.telegram.sent]
+        self.assertTrue(any("GRID SİNYALİ: SOL-USDT" in t and "TEST botu otomatik" in t for t in sent))
+        self.assertTrue(any("GRID BOTU KURULDU" in t for t in sent))
+        self.assertEqual([b["instrument"] for b in self.bot.grid.active()], ["SOL-USDT"])
+        count = len(sent)
+        self.bot.job_grid()  # same signal again: no second alert, no second bot
+        self.assertEqual(len(self.bot.telegram.sent), count)
+        self.assertIn("SOL-USDT", self.bot.handle(self.message("/radar")))
+        self.assertIn("Grid sinyali taraması", self.bot.handle(self.message("/durum")))
+
+    def test_with_automation_off_the_signal_is_only_an_alert(self):
+        self.bot.grid.set_auto(False)
+        self.bot.job_grid()
+        sent = [text for _, text in self.bot.telegram.sent]
+        self.assertTrue(any("otomatik işlem açılmaz" in t for t in sent))
+        self.assertEqual(self.bot.grid.active(), [])
 
 
 class ActionsRunTests(unittest.TestCase):
@@ -684,7 +788,7 @@ class ActionsRunTests(unittest.TestCase):
 
     def bot(self, chats="5"):
         env = dict(self.env, TELEGRAM_ALLOWED_CHAT_IDS=chats)
-        bot = LiveBot(self.run_mod.run_settings(env), telegram=FakeTelegram(), reader=reader({}), market=FakeMarket(),
+        bot = LiveBot(self.run_mod.run_settings(env), telegram=FakeTelegram(), reader=reader({}),
                       clock_ms=lambda: self.now[0] * 1000)
         self.calls = []
         for name, _ in self.run_mod.JOBS:
@@ -840,7 +944,7 @@ class ActionsRunTests(unittest.TestCase):
         self.assertIn("job_rotation", result["jobs"])
         self.assertIn("GRID BOTLARI", bot.telegram.sent[-1][1])
         again = LiveBot(self.run_mod.run_settings(self.env), telegram=FakeTelegram(), reader=reader({}),
-                        market=FakeMarket())
+                        )
         self.assertEqual(again.grid._meta("telegram_offset"), 11)
         # A scan stored by an earlier run is what /erkenlong shows in a fresh process.
         again.grid._set_meta("early_scan", {"at_ms": 1_800_000_000_000, "scanned": 3, "errors": 0, "results": [

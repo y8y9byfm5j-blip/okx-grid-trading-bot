@@ -70,13 +70,12 @@ def help_text(mode):
         "🤖 OKX TR Bot komutları",
         "/rotasyon — ana para nereden çıkıp nereye gidiyor",
         "/erkenlong — büyük yükseliş öncesi birikim adayları",
-        "/analiz COIN — tek coin: grid uygunluğu, para akışı, erken long skoru",
-        "/grid COIN — bu coin için kurulacak grid planı",
-        "/radar — en hacimli coinlerde grid uygunluğu",
+        "/gridsinyal (veya /radar) — yükselip yataya geçen, hacmi soğuyan coinler ve grid aralıkları",
+        "/grid COIN — o coin için grid sinyali: uygun mu, aralık, grid sayısı",
+        "/analiz COIN — /grid + para akışı + erken long skoru",
         "/botlar (veya /paper) — açık/kapanan grid botları ve kâr/zarar",
         "/durum — sistem durumu ve limitler",
         "/otomatik ac | /otomatik kapat — otomatik grid kurulumu",
-        "/risk — bot başı stop zararı (ör. /risk 10)",
         "/durdur COIN — o coindeki botu durdur (coin USDT'ye satılır)",
         "/acil_durdur — tüm botları durdur, otomasyonu kapat",
         "/devam — zarar sınırı/acil durdurmadan sonra otomasyonu yeniden aç",
@@ -148,25 +147,50 @@ def early_alert(row):
                       "Bilgi amaçlıdır; otomatik işlem açılmaz."])
 
 
-def decision_text(decision, *, title="GRID ANALİZİ"):
-    m = decision.get("market_summary") or {}
-    lines = [f"📊 {title}: {decision['instrument']}", f"Veri: {when(decision['as_of_ms'])} | {decision['data_status']}"]
-    if m:
-        t = m.get("trend", {})
-        lines += [f"Fiyat {m['price']} | spread {Decimal(m['spread_bps']):.1f} bps | 24s hacim {usd(m['quote_volume_24h_usdt'], signed=False)}",
-                  f"Trend 15dk {pct(t.get('return_15m'), 2)} | 1s {pct(t.get('return_1h'), 2)} | 4s {pct(t.get('return_4h'), 2)}",
-                  f"BTC 1s {pct(t.get('btc_return_1h'), 2)} | 4s {pct(t.get('btc_return_4h'), 2)}"]
-    s = decision["scoring"]
-    lines.append(f"Kriterler: {s['passed']}/{s['required']} | skor {s['score']}")
-    plan = decision.get("plan")
-    if plan:
-        lines += [f"Plan: {plan['lower']} – {plan['upper']} | {plan['grids']} grid | {plan['capital']} USDT",
-                  f"Stop {plan['stop']} | Kâr al {plan['take_profit']} | planlanan zarar {Decimal(decision['planned_loss_usdt']):.2f} USDT"]
-    if decision["eligible"]:
-        lines.append("✅ UYGUN — otomatik modda grid botu kurulabilir.")
-    else:
-        lines.append("⛔ BEKLE — " + "; ".join(reason(r) for r in decision["reasons"][:4]))
+def num(value):
+    return f"{float(value):.6g}".replace(".", ",")
+
+
+def _plan_lines(row):
+    p = row["plan"]
+    return [f"Grid aralığı: {num(p['lower'])} – {num(p['upper'])} ({row['k']} günlük bant, genişlik %{row['width'] * 100:.0f})",
+            f"{p['grids']} grid | adım {pct(p['step_pct'], 2)} (komisyon sonrası {pct(p['step_net_pct'], 2)}) | "
+            f"fiyat şimdi {num(row['price'])}",
+            f"Son {p['days']:.0f} günde bantta {p['crossings']} grid çizgisi geçildi, "
+            f"geçmiş harekete göre tahmini ≈ {pct(p['est_daily_pct'], 2)}/gün",
+            f"Stop {num(p['stop'])} | kâr al {num(p['take_profit'])}"]
+
+
+def range_text(scan, top=8):
+    if not scan:
+        return "Grid sinyal taraması henüz tamamlanmadı (ilk tarama birkaç dakika sürer)."
+    picks = [r for r in scan["results"] if r["label"] in {"GÜÇLÜ", "İZLE"}][:top]
+    lines = ["📐 GRID SİNYALLERİ — yükseldi, yataya geçti, hacim soğuyor",
+             f"Taranan: {scan['scanned']} coin | {when(scan['at_ms'])}", ""]
+    if not picks:
+        lines.append("Şu an kriterleri sağlayan coin yok. BEKLE.")
+    for i, r in enumerate(picks, 1):
+        lines.append(f"{i}. {r['instrument']}  skor {r['score']} {r['label']}")
+        lines += ["   " + text for text in _plan_lines(r)[:2]]
+        lines += ["   • " + text for text in r["reasons"][:4]]
+    lines += ["", "Kriterler: öncesinde ≥%20 yükseliş, trend sağlam, 4-20% yatay bant, hacim yükselişten düşük ama canlı, "
+              "OBV düşmüyor. Ayrıntı: /grid COIN"]
     return "\n".join(lines)
+
+
+def range_alert(row, auto=False):
+    lines = [f"📐 GRID SİNYALİ: {row['instrument']} — skor {row['score']}", *_plan_lines(row),
+             *("• " + t for t in row["reasons"][:5])]
+    lines.append("TEST botu otomatik açılır (gerçek emir yok)." if auto else "Bilgi amaçlıdır; otomatik işlem açılmaz.")
+    return "\n".join(lines)
+
+
+def range_analysis(row):
+    head = f"📐 GRID SİNYALİ: {row['instrument']} — skor {row['score']} {row['label']}"
+    if "plan" not in row:
+        return "\n".join([head, "Uygun değil: " + row["reasons"][0],
+                           "Aranan: öncesinde ≥%20 yükseliş, trend sağlam, 4-20% yatay bant, hacim soğuyor."])
+    return "\n".join([head, *_plan_lines(row), *("• " + t for t in row["reasons"][:6])])
 
 
 def bots_text(summary, closed):

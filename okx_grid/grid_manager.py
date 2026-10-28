@@ -44,7 +44,7 @@ class GridLimits:
             raise TradingError("INVALID_GRID_LIMITS")
 
 
-def okx_grid_params(decision, limits):
+def okx_grid_params(decision, limits, enforce_risk=True):
     """Map a V7 plan onto OKX spot grid parameters, keeping each grid step tradable."""
     plan = decision.get("plan")
     if not decision.get("eligible") or not plan:
@@ -55,7 +55,7 @@ def okx_grid_params(decision, limits):
     grids = int(plan["grids"])
     if capital != limits.bot_capital:
         raise TradingError("BOT_CAPITAL_MISMATCH")
-    if Decimal(decision.get("planned_loss_usdt") or "Infinity") > limits.risk_per_bot:
+    if enforce_risk and Decimal(decision.get("planned_loss_usdt") or "Infinity") > limits.risk_per_bot:
         raise TradingError("BOT_RISK_LIMIT")
     while grids > 2 and (upper - lower) / grids / upper < limits.min_step_fraction:
         grids -= 1
@@ -184,11 +184,11 @@ class GridBotManager:
         return reasons
 
     # -- actions ----------------------------------------------------------------------
-    def open_from_decision(self, decision):
+    def open_from_decision(self, decision, enforce_risk=True):
         with self._lock:
             if self.mode == "live" and decision.get("data_status") != "VERIFIED_TR_PUBLIC":
                 raise TradingError("DATA_UNVERIFIED")
-            params = okx_grid_params(decision, self.limits)
+            params = okx_grid_params(decision, self.limits, enforce_risk)
             reasons = self.blocking_reasons(params["instrument"])
             if reasons:
                 raise TradingError(reasons[0])

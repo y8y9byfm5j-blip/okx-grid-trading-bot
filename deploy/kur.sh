@@ -88,7 +88,8 @@ else
 fi
 
 say "5/5 Yeni servis başlatılıyor"
-systemctl enable --now "$NEW"
+systemctl enable "$NEW"
+systemctl restart "$NEW"  # a running older copy must load the updated code
 sleep 8
 if journalctl -u "$NEW" -n 60 --no-pager 2>/dev/null | grep -q "TELEGRAM_ERROR_409"; then
   say "⚠️ Başka bir program hâlâ aynı botu okuyor. Bu listenin ekran görüntüsünü gönderin:"
