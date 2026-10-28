@@ -69,6 +69,16 @@ for target in $targets; do
   esac
 done
 
+# The owner asked to remove the old bot: stop and disable every other okx-* unit (files stay untouched).
+removed=""
+for unit in $(systemctl list-unit-files 'okx-*' --no-legend 2>/dev/null | awk '{print $1}'); do
+  [ "$unit" = "$NEW" ] && continue
+  systemctl stop "$unit" >/dev/null 2>&1 || true
+  systemctl disable "$unit" >/dev/null 2>&1 || true
+  removed="$removed $unit"
+done
+[ -n "$removed" ] && echo "Eski bot servisleri durduruldu ve devre dışı bırakıldı:$removed (dosyalar silinmedi)."
+
 say "4/5 Sohbet kimliği"
 chats="$(value TELEGRAM_ALLOWED_CHAT_IDS)"
 if [ -n "$chats" ] && [ "$chats" != "CHANGE_ME" ]; then

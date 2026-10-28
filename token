@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# One short command for a phone console without paste: installs the bot on this
+# server, asks for the token and the chat ID by typing (validated with Telegram),
+# then finishes the setup in the background: bash k/token
+set -u
+cd "$(dirname "$0")" || exit 1
+if [ "$(id -u)" -ne 0 ]; then
+  echo "root olarak çalıştırın (DigitalOcean konsolunda zaten root'sunuz)."
+  exit 1
+fi
+git pull -q 2>/dev/null || echo "(git pull atlandı)"
+bash deploy/install.sh >/root/install.log 2>&1 || { echo "Kod kurulamadı. 'tail -n 20 /root/install.log' yazıp ekran görüntüsünü gönderin."; exit 1; }
+PY="$(cat /opt/okx-tr-bot/PYTHON)"
+ENV_FILE=/etc/okx-tr-bot.env
+"$PY" -m okx_grid.setup_helper yaz-bot "$ENV_FILE" "$@" || exit 1
+"$PY" -m okx_grid.setup_helper yaz-sohbet "$ENV_FILE" || exit 1
+echo "Bilgiler kaydedildi. Kurulum arka planda sürüyor (eski bot kaldırılıyor, yeni bot başlıyor)..."
+echo "$(date '+%H:%M:%S') kurulum başlatıldı" > /root/kur.log
+setsid nohup bash deploy/kur.sh -y >> /root/kur.log 2>&1 < /dev/null &
+echo "Birkaç dakika içinde Telegram'a 'OKX TR bot başladı' mesajı gelecek."
+echo "Durumu görmek için: tail -n 15 /root/kur.log"

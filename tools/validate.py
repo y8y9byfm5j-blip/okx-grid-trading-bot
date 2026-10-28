@@ -23,7 +23,7 @@ def main():
                  "okx_grid/rotation.py", "okx_grid/early_long.py", "okx_grid/live_reports.py", "tests/test_live_bot.py",
                  "deploy/install.sh", "deploy/okx-tr-bot.service", "docs/LIVE_BOT.md",
                  "deploy/kur.sh", "okx_grid/setup_helper.py", "go",
-                 "okx_grid/actions_run.py", ".github/workflows/telegram-bot.yml", "docs/GITHUB_BOT.md"]
+                 "okx_grid/actions_run.py", ".github/workflows/telegram-bot.yml", "docs/GITHUB_BOT.md", "token"]
     if any(not (ROOT / p).is_file() for p in required):
         print("Required validation or application file missing.", file=sys.stderr)
         return 1

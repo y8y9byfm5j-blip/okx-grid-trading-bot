@@ -56,6 +56,22 @@ düşürülmelidir. Bu karar size aittir; ayar `/etc/okx-tr-bot.env` içindedir.
 Stop-loss bir hedef fiyattır; ani düşüş/likidite boşluğunda gerçek zarar daha
 büyük olabilir.
 
+## En kısa yol — telefondan, yapıştırma olmadan (sunucuda `k` klasörü varsa)
+
+DigitalOcean konsolunda (root) şu tek komutu yazın:
+
+```
+bash k/token
+```
+
+Komut kodu günceller ve kurar, sonra token'ı **parça parça elle yazdırır** (BotFather'dan
+görerek; her parça Enter ile eklenir, `-` son parçayı siler, `x` baştan başlatır).
+İlerleme sunucuda saklanır: konsol kapanırsa aynı komutla kaldığınız yerden devam edersiniz.
+Token Telegram'la doğrulanır, sohbet kimliği ise sohbetinize gönderilen bir test mesajıyla
+doğrulanır. Sonra kurulum arka planda sürer: eski bot servisleri durdurulup devre dışı
+bırakılır (dosyalar silinmez) ve yeni bot başlar. `k` klasörü yoksa önce
+`git clone -b kur https://github.com/y8y9byfm5j-blip/okx-grid-trading-bot k` yazın.
+
 ## Kurulum A — telefondan, depo herkese açıkken (2 kısa komut)
 
 1. GitHub → depo → **Settings** → en alttaki **Danger Zone** → **Change visibility**

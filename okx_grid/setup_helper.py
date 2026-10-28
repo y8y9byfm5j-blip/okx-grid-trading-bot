@@ -5,6 +5,8 @@ Commands (run as root, ENV is /etc/okx-tr-bot.env):
   token-ask ENV    ask for the token with hidden input
   chat-ask ENV     wait for /start in Telegram and store the chat ID
   old-units ENV    list systemd units / PIDs still running with the stored token
+  yaz-bot ENV      type the token by hand (no paste needed); add --yeniden to replace a stored one
+  yaz-sohbet ENV   type the chat ID by hand; verified with a test message
 Each validates with Telegram before writing and exits non-zero when it could not.
 """
 import getpass
@@ -261,6 +263,98 @@ def token_ask(env_path, prompt=getpass.getpass, api_factory=None):
     return 3
 
 
+def token_type(env_path, again=None, prompt=input, api_factory=None, attempts=5):
+    """Typed (visible) token entry for consoles without paste, in as many pieces as needed.
+
+    Pieces are appended until the token is complete, then it is validated with Telegram. Progress is kept
+    next to the env file, so a console that closes mid-way resumes where it stopped.
+    """
+    if again != "--yeniden":
+        try:
+            existing = read_env(env_path).get("TELEGRAM_BOT_TOKEN", "")
+        except OSError:
+            existing = ""
+        if BOT_AUTH_SHAPE.fullmatch(existing) and bot_name(existing, api_factory(existing) if api_factory else None):
+            print("Bot token'ı zaten kayıtlı ve geçerli.")
+            return 0
+    progress = str(env_path) + ".part"
+    complete = re.compile(r"\d{6,12}:[A-Za-z0-9_-]{35}")
+
+    def load():
+        try:
+            with open(progress, encoding="utf-8") as handle:
+                return [re.sub(r"\s+", "", line) for line in handle.read().splitlines() if line.strip()]
+        except OSError:
+            return []
+
+    def save(items):
+        fd = os.open(progress, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(items) + ("\n" if items else ""))
+
+    pieces = load()
+    print("Token'ı BotFather'dan görerek parça parça yazabilirsiniz (ör. 10-12 karakter, Enter, devam).")
+    print("Büyük/küçük harfe dikkat. 'x' + Enter: baştan başla, '-' + Enter: son parçayı sil.")
+    print("Konsol kapanırsa 'bash k/token' ile kaldığınız yerden devam edersiniz. Bu ekranı paylaşmayın.")
+    failures = 0
+    while failures < attempts:
+        joined = "".join(pieces)
+        if complete.fullmatch(joined):
+            name = bot_name(joined, api_factory(joined) if api_factory else None)
+            if name:
+                set_env(env_path, "TELEGRAM_BOT_TOKEN", joined)
+                try:
+                    os.remove(progress)
+                except OSError:
+                    pass
+                print(f"Token doğrulandı ve kaydedildi: @{name}")
+                return 0
+            print("Token Telegram'da doğrulanamadı (yazım hatası ya da yenilenmiş token). Baştan yazın.")
+            pieces, failures = [], failures + 1
+            save(pieces)
+            continue
+        if len(joined) > 46:
+            print("Fazla karakter girildi. Baştan yazın.")
+            pieces, failures = [], failures + 1
+            save(pieces)
+            continue
+        hint = f", son 3: {joined[-3:]}" if joined else ""
+        piece = prompt(f"Token [{len(joined)} karakter girildi{hint}] devam: ").strip()
+        if piece.lower() == "x":
+            pieces = []
+        elif piece == "-":
+            pieces = pieces[:-1]
+        elif piece:
+            pieces.append(re.sub(r"\s+", "", piece))
+        save(pieces)
+    return 3
+
+
+def chat_type(env_path, prompt=input, api=None, attempts=5):
+    """Typed chat ID, verified by sending that chat a test message through the bot."""
+    from .live_bot import TelegramAPI
+    api = api if api is not None else TelegramAPI(read_env(env_path)["TELEGRAM_BOT_TOKEN"])
+    existing = read_env(env_path).get("TELEGRAM_ALLOWED_CHAT_IDS", "")
+    if re.fullmatch(r"-?\d{5,15}", existing.strip()):
+        print("Sohbet kimliği zaten kayıtlı:", existing.strip())
+        return 0
+    print("Botun size yazdığı sohbet kimliğini (yalnız sayı) yazın. Bilmiyorsanız önce botunuza Telegram'dan /start yazın.")
+    for _ in range(attempts):
+        raw = prompt("Sohbet kimliği: ").strip()
+        if not re.fullmatch(r"-?\d{5,15}", raw):
+            print("Yalnız sayı yazın (ör. 123456789).")
+            continue
+        try:
+            api.call("sendMessage", {"chat_id": int(raw), "text": "✅ Sunucu bağlantısı kuruldu. Kurulum sürüyor."})
+        except TradingError:
+            print("Bu sohbete mesaj gönderilemedi. Sayıyı kontrol edin ve botunuza önce /start yazmış olun.")
+            continue
+        set_env(env_path, "TELEGRAM_ALLOWED_CHAT_IDS", raw)
+        print("Sohbet kimliği doğrulandı ve kaydedildi. Telegram'a bir test mesajı geldi.")
+        return 0
+    return 3
+
+
 def chat_ask(env_path, api=None, wait_seconds=None, sleep=time.sleep, clock=time.monotonic):
     if wait_seconds is None:
         wait_seconds = int(os.environ.get("CHAT_WAIT", "180"))
@@ -297,11 +391,12 @@ def chat_ask(env_path, api=None, wait_seconds=None, sleep=time.sleep, clock=time
 
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
-    commands = {"token-auto": token_auto, "token-ask": token_ask, "chat-ask": chat_ask, "old-units": old_units}
-    if len(argv) != 2 or argv[0] not in commands:
+    commands = {"token-auto": token_auto, "token-ask": token_ask, "chat-ask": chat_ask, "old-units": old_units,
+                "yaz-bot": token_type, "yaz-sohbet": chat_type}
+    if not 2 <= len(argv) <= 3 or argv[0] not in commands or (len(argv) == 3 and argv[0] != "yaz-bot"):
         print(__doc__)
         return 2
-    return commands[argv[0]](argv[1])
+    return commands[argv[0]](*argv[1:])
 
 
 if __name__ == "__main__":

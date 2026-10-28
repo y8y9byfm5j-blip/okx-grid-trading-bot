@@ -1,5 +1,9 @@
 # OKX TR Telegram botu — sunucusuz (GitHub üzerinde)
 
+> **Not:** GitHub'ın zamanlayıcısı güvenilir değil (saatlerce çalışmayabilir). Sürekli çalışan kurulum için
+> [LIVE_BOT.md](LIVE_BOT.md) kullanılır. Sunucudaki bot başladıktan sonra bu iş akışı kapatılmalıdır, çünkü iki program aynı
+> Telegram botunu okuyamaz.
+
 Konsol ve sunucu gerekmez. GitHub'ın ücretsiz çalıştırıcısı (Actions) botu her
 5 dakikada bir başlatır; her tur yaklaşık 4 dakika çalışır, Telegram komutlarına
 cevap verir ve zamanı gelen işleri yapar:

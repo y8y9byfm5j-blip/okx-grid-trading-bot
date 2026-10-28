@@ -528,6 +528,58 @@ class RiskCommandTests(LiveBotTests):
         self.assertIn("10", again.handle(self.message("/risk")))
 
 
+class TypedEntryTests(unittest.TestCase):
+    def test_token_and_chat_are_typed_validated_and_saved(self):
+        from okx_grid import setup_helper
+        good = "123456789:" + "F" * 35
+
+        class Api:
+            def __init__(self, value=None, fail_chat=()):
+                self.value, self.fail_chat, self.sent = value, fail_chat, []
+
+            def call(self, method, body, timeout=20):
+                if method == "getMe":
+                    if self.value != good:
+                        raise TradingError("TELEGRAM_ERROR_401")
+                    return {"username": "okx_test_bot"}
+                if body["chat_id"] in self.fail_chat:
+                    raise TradingError("TELEGRAM_ERROR_400")
+                self.sent.append(body["chat_id"])
+                return {}
+        with tempfile.TemporaryDirectory() as d:
+            env = Path(d) / "bot.env"
+            env.write_text("GRID_EXECUTION=paper\n")
+            # Typed in pieces: a wrong piece is removed with "-", and a mid-way stop resumes from the saved pieces.
+            answers = iter(["123456", "zzz", "-", "789:FFFFFFFF", "FFFFFFFF"])
+            with self.assertRaises(StopIteration):
+                setup_helper.token_type(env, prompt=lambda _: next(answers), api_factory=Api)
+            self.assertEqual((Path(str(env) + ".part").read_text().split()), ["123456", "789:FFFFFFFF", "FFFFFFFF"])
+            self.assertEqual(oct(Path(str(env) + ".part").stat().st_mode & 0o777), "0o600")
+            answers = iter(["F" * 19])
+            self.assertEqual(setup_helper.token_type(env, prompt=lambda _: next(answers), api_factory=Api), 0)
+            self.assertFalse(Path(str(env) + ".part").exists())
+            self.assertEqual(setup_helper.read_env(env)["TELEGRAM_BOT_TOKEN"], good)
+            # A wrong complete token restarts instead of being saved; too many failures stop with code 3.
+            env.write_text("GRID_EXECUTION=paper\n")
+            answers = iter(["123456789:" + "E" * 35] * 3)
+            self.assertEqual(setup_helper.token_type(env, prompt=lambda _: next(answers), api_factory=Api, attempts=3), 3)
+            self.assertNotIn("TELEGRAM_BOT_TOKEN", setup_helper.read_env(env))
+            answers = iter(["x" * 20, "x" * 30])
+            self.assertEqual(setup_helper.token_type(env, prompt=lambda _: next(answers), api_factory=Api, attempts=1), 3)
+            answers = iter(["12345:short", "x" * 46, good + " "])
+            self.assertEqual(setup_helper.token_type(env, prompt=lambda _: next(answers), api_factory=Api), 0)
+            self.assertEqual(setup_helper.read_env(env)["TELEGRAM_BOT_TOKEN"], good)
+            self.assertEqual(setup_helper.read_env(env)["GRID_EXECUTION"], "paper")
+            # A stored valid token is kept unless --yeniden is given.
+            self.assertEqual(setup_helper.token_type(env, prompt=lambda _: 1 / 0, api_factory=Api), 0)
+            api = Api(good, fail_chat={999999})
+            answers = iter(["abc", "999999", "55555"])
+            self.assertEqual(setup_helper.chat_type(env, prompt=lambda _: next(answers), api=api), 0)
+            self.assertEqual((setup_helper.read_env(env)["TELEGRAM_ALLOWED_CHAT_IDS"], api.sent), ("55555", [55555]))
+            self.assertEqual(setup_helper.chat_type(env, prompt=lambda _: 1 / 0, api=api), 0)
+            self.assertEqual(setup_helper.token_type(env, "--yeniden", prompt=lambda _: "bad", api_factory=Api, attempts=2), 3)
+
+
 class OldBotDiscoveryTests(unittest.TestCase):
     def test_running_old_bot_token_and_its_unit_are_found(self):
         from okx_grid import setup_helper
