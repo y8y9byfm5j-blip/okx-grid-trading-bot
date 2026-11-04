@@ -198,7 +198,8 @@ def digest_text(scan, bots, *, at_ms, early=()):
         if near:
             lines.append("🔎 Kritere en yakın:")
             lines += [f"• {r['instrument']} {r['passed']}/8 kural — {r['reasons'][0]}" for r in near]
-    lines.append(f"🤖 Açık TEST botu: {len(bots['active'])} | gerçekleşen K/Z """ + f"{bots['realized_pnl']:.2f}".replace(".", ",") + " USDT")
+    pnl = f"{bots['realized_pnl']:.2f}".replace(".", ",")
+    lines.append(f"🤖 Açık TEST botu: {len(bots['active'])} | gerçekleşen K/Z {pnl} USDT")
     if early:
         lines.append("🚀 Erken long (bilgi): " + ", ".join(f"{r['instrument']} {r['score']}" for r in early)
                      + " — ayrıntı /erkenlong")
