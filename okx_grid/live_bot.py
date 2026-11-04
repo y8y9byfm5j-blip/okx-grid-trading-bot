@@ -8,6 +8,7 @@ calls OKX private endpoints; GRID_EXECUTION=live requires OKX TR API keys.
 from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
+import html
 import http.client
 import json
 import logging
@@ -24,8 +25,8 @@ from urllib.request import HTTPSHandler, Request, build_opener
 from .domain import TradingError
 from .early_long import STRONG, EarlyLongScanner, features, score
 from .grid_manager import GridBotManager, GridLimits
-from .live_reports import (TR_TIME, bots_text, digest_text, early_text, event_text, help_text, range_alert, range_analysis,
-                           range_text, reason, rotation_text, usd, when)
+from .live_reports import (TR_TIME, Html, bots_text, digest_text, early_text, event_text, help_text, range_alert, range_analysis,
+                           esc, range_text, reason, rotation_text, usd, when)
 from .range_grid import STRONG as RANGE_STRONG, RangeGridScanner, signal_decision
 from .rotation import RotationTracker
 from .tr_public import CachedCandles, TRPublic, coin_volumes
@@ -139,6 +140,12 @@ class TelegramAPI:
                                         "allowed_updates": ["message"]}, timeout=timeout + 15)
 
     def send(self, chat_id, text):
+        if isinstance(text, Html):
+            if len(text) <= 4000:
+                self.call("sendMessage", {"chat_id": chat_id, "text": str(text), "parse_mode": "HTML",
+                                          "disable_web_page_preview": True})
+                return
+            text = html.unescape(re.sub(r"</?(pre|b)>", "", text))  # too long for one message: plain text
         for start in range(0, len(text), 3900):
             self.call("sendMessage", {"chat_id": chat_id, "text": text[start:start + 3900],
                                       "disable_web_page_preview": True})
@@ -237,7 +244,7 @@ class LiveBot:
             instrument = self.pair(args)
             text = range_analysis(self.range_scanner.analyze(instrument))
             if name == "/analiz":
-                text += "\n\n" + self.coin_extras(instrument)
+                text = Html(text + "\n\n" + esc(self.coin_extras(instrument)))
             return text
         if name in {"/gridsinyal", "/sinyal", "/radar"}:
             return range_text(self.last_range())

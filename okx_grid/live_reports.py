@@ -1,6 +1,8 @@
 """Turkish Telegram texts for the live service. Plain text, no parse mode."""
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import html
+import math
 
 TR_TIME = timezone(timedelta(hours=3))  # Turkey has no DST
 REASONS = {
@@ -145,73 +147,117 @@ def num(value):
     return f"{float(value):.6g}".replace(".", ",")
 
 
-def _plan_lines(row):
+class Html(str):
+    """A message in Telegram's HTML mode, so tables arrive in an aligned monospace block."""
+
+
+def esc(text):
+    return html.escape(str(text), quote=False)
+
+
+def price(value):
+    """Grid entry price with 5 significant digits, never in exponent form."""
+    value = float(value)
+    digits = max(0, 4 - math.floor(math.log10(value))) if value > 0 else 2
+    text = f"{value:.{digits}f}"
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text.replace(".", ",")
+
+
+def share(value):
+    return f"%{value * 100:.2f}".replace(".", ",")
+
+
+def table(headers, rows, left=(1,)):
+    """Monospace table; columns in `left` are left aligned, the rest right aligned (numbers)."""
+    widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
+    lines = [" ".join(c.ljust(w) if i in left else c.rjust(w) for i, (c, w) in enumerate(zip(line, widths))).rstrip()
+             for line in [headers, *rows]]
+    return "<pre>" + esc("\n".join(lines)) + "</pre>"
+
+
+def entry_tables(picks):
+    """Two short tables (fit a phone screen): grid settings, then entry and exit prices. Best score first."""
+    setup, entry = [], []
+    for i, r in enumerate(picks, 1):
+        p, coin = r["plan"], r["instrument"].split("-")[0]
+        setup.append([str(i), coin, price(p["lower"]), price(p["upper"]), str(p["grids"]), share(p["step_pct"])])
+        entry.append([str(i), coin, price(r["price"]), price(p["stop"]), price(p["take_profit"]), str(r["score"])])
+    return ["<b>Grid kurulumu</b> (OKX Spot Grid, aritmetik, USDT):",
+            table(["#", "Coin", "Alt", "Üst", "Grid", "Adım"], setup),
+            "<b>Giriş ve çıkış:</b>",
+            table(["#", "Coin", "Şimdi", "Stop", "Kâr al", "Skor"], entry)]
+
+
+def entry_card(row):
     p = row["plan"]
-    return [f"Grid aralığı: {num(p['lower'])} – {num(p['upper'])} ({row['k']} günlük bant, genişlik %{row['width'] * 100:.0f})",
-            f"{p['grids']} grid | adım {pct(p['step_pct'], 2)} (komisyon sonrası {pct(p['step_net_pct'], 2)}) | "
-            f"fiyat şimdi {num(row['price'])}",
-            f"Son {p['days']:.0f} günde bantta {p['crossings']} grid çizgisi geçildi, "
-            f"geçmiş harekete göre tahmini ≈ {pct(p['est_daily_pct'], 2)}/gün",
-            f"Stop {num(p['stop'])} | kâr al {num(p['take_profit'])}"]
+    rows = [["Coin", row["instrument"]], ["Alt fiyat", price(p["lower"])], ["Üst fiyat", price(p["upper"])],
+            ["Grid sayısı", f"{p['grids']} (aritmetik)"],
+            ["Grid adımı", f"{share(p['step_pct'])} (net {share(p['step_net_pct'])})"],
+            ["Şimdi", price(row["price"])], ["Stop", price(p["stop"])], ["Kâr al", price(p["take_profit"])],
+            ["Tahmini/gün", f"≈ {share(p['est_daily_pct'])}"], ["Skor", f"{row['score']} {row['label']}"]]
+    return table(["Ayar", "Değer"], rows, left=(0, 1))
 
 
 def range_text(scan, top=8):
     if not scan:
         return "Grid sinyal taraması henüz tamamlanmadı (ilk tarama birkaç dakika sürer)."
     picks = [r for r in scan["results"] if r["label"] in {"GÜÇLÜ", "İZLE"}][:top]
-    lines = ["📐 GRID SİNYALLERİ — yükseldi, yataya geçti, hacim soğuyor",
-             f"Taranan: {scan['scanned']} coin | {when(scan['at_ms'])}", ""]
-    if not picks:
+    lines = ["📐 <b>GRID SİNYALLERİ</b> — yükseldi, yataya geçti, hacim soğuyor",
+             esc(f"Taranan: {scan['scanned']} coin | {when(scan['at_ms'])}"), ""]
+    if picks:
+        lines += entry_tables(picks)
+    else:
         lines.append("Şu an kriterleri sağlayan coin yok. BEKLE.")
-    for i, r in enumerate(picks, 1):
-        lines.append(f"{i}. {r['instrument']}  skor {r['score']} {r['label']}")
-        lines += ["   " + text for text in _plan_lines(r)[:2]]
-        lines += ["   • " + text for text in r["reasons"][:4]]
-    lines += ["", "Kriterler: öncesinde ≥%20 yükseliş, trend sağlam, 4-20% yatay bant, hacim yükselişten düşük ama canlı, "
-              "OBV düşmüyor. Ayrıntı: /grid COIN"]
-    return "\n".join(lines)
+        lines += _near_lines(scan)
+    lines += ["", esc("Kriterler: öncesinde ≥%20 yükseliş, trend sağlam, %4-20 yatay bant, hacim yükselişten düşük "
+                      "ama canlı, OBV düşmüyor. Coin ayrıntısı: /grid COIN")]
+    return Html("\n".join(lines))
+
+
+def _near_lines(scan):
+    near = scan.get("near") or []
+    if not near:
+        return []
+    return ["🔎 Kritere en yakın:", *(esc(f"• {r['instrument']} {r['passed']}/8 kural — {r['reasons'][0]}") for r in near)]
 
 
 def range_alert(row, auto=False):
-    lines = [f"📐 GRID SİNYALİ: {row['instrument']} — skor {row['score']}", *_plan_lines(row),
-             *("• " + t for t in row["reasons"][:5])]
-    lines.append("TEST botu otomatik açılır (gerçek emir yok)." if auto else "Bilgi amaçlıdır; otomatik işlem açılmaz.")
-    return "\n".join(lines)
+    lines = [f"📐 <b>GRID SİNYALİ: {esc(row['instrument'])}</b> — skor {row['score']}", entry_card(row),
+             *(esc("• " + t) for t in row["reasons"][:5]),
+             "TEST botu otomatik açılır (gerçek emir yok)." if auto else "Bilgi amaçlıdır; otomatik işlem açılmaz."]
+    return Html("\n".join(lines))
 
 
 def digest_text(scan, bots, *, at_ms, early=()):
     """Twice-daily grid summary: what passed, what came closest, open test bots, early longs (morning)."""
-    lines = [f"📋 GRID ÖZETİ — {when(at_ms)}"]
+    lines = [f"📋 <b>GRID ÖZETİ</b> — {when(at_ms)}"]
     if not scan:
         lines.append("Grid taraması henüz tamamlanmadı.")
     else:
         took = f" ({scan['seconds']:g} sn)".replace(".", ",") if scan.get("seconds") is not None else ""
         picks = [r for r in scan["results"] if r["label"] in {"GÜÇLÜ", "İZLE"}][:5]
-        lines.append(f"Son tarama {when(scan['at_ms'])}{took} | {scan['scanned']} coin | uygun: {len(picks)}")
-        for r in picks:
-            p = r["plan"]
-            lines.append(f"✅ {r['instrument']} skor {r['score']}: {num(p['lower'])} – {num(p['upper'])}, "
-                         f"{p['grids']} grid, adım {pct(p['step_pct'], 2)}")
-        if not picks:
+        lines.append(esc(f"Son tarama {when(scan['at_ms'])}{took} | {scan['scanned']} coin | uygun: {len(picks)}"))
+        if picks:
+            lines += entry_tables(picks)
+        else:
             lines.append("Şu an kriterleri sağlayan coin yok. BEKLE.")
-        near = scan.get("near") or []
-        if near:
-            lines.append("🔎 Kritere en yakın:")
-            lines += [f"• {r['instrument']} {r['passed']}/8 kural — {r['reasons'][0]}" for r in near]
+        lines += _near_lines(scan)
     pnl = f"{bots['realized_pnl']:.2f}".replace(".", ",")
     lines.append(f"🤖 Açık TEST botu: {len(bots['active'])} | gerçekleşen K/Z {pnl} USDT")
     if early:
-        lines.append("🚀 Erken long (bilgi): " + ", ".join(f"{r['instrument']} {r['score']}" for r in early)
-                     + " — ayrıntı /erkenlong")
-    return "\n".join(lines)
+        lines.append(esc("🚀 Erken long (bilgi): " + ", ".join(f"{r['instrument']} {r['score']}" for r in early)
+                         + " — ayrıntı /erkenlong"))
+    return Html("\n".join(lines))
 
 
 def range_analysis(row):
-    head = f"📐 GRID SİNYALİ: {row['instrument']} — skor {row['score']} {row['label']}"
+    head = f"📐 <b>GRID SİNYALİ: {esc(row['instrument'])}</b> — skor {row['score']} {esc(row['label'])}"
     if "plan" not in row:
-        return "\n".join([head, "Uygun değil: " + row["reasons"][0],
-                           "Aranan: öncesinde ≥%20 yükseliş, trend sağlam, 4-20% yatay bant, hacim soğuyor."])
-    return "\n".join([head, *_plan_lines(row), *("• " + t for t in row["reasons"][:6])])
+        return Html("\n".join([head, esc("Uygun değil: " + row["reasons"][0]),
+                                esc("Aranan: öncesinde ≥%20 yükseliş, trend sağlam, %4-20 yatay bant, hacim soğuyor.")]))
+    return Html("\n".join([head, entry_card(row), *(esc("• " + t) for t in row["reasons"][:6])]))
 
 
 def bots_text(summary, closed):

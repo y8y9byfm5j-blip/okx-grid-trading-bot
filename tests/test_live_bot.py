@@ -820,7 +820,8 @@ class GridSignalBotTests(LiveBotTests):
     def test_commands_show_the_signal_and_the_reason_it_fails(self):
         self.assertIn("henüz tamamlanmadı", self.bot.handle(self.message("/gridsinyal")))
         text = self.bot.handle(self.message("/grid sol"))
-        self.assertIn("Grid aralığı", text)
+        self.assertIn("Alt fiyat   144,6", text)
+        self.assertIn("Grid sayısı 11 (aritmetik)", text)
         self.assertIn("GÜÇLÜ", text)
         self.assertIn("Uygun değil", self.bot.handle(self.message("/grid btc")))
         self.assertIn("GRID BOTLARI", self.bot.handle(self.message("/paper")))
@@ -834,7 +835,8 @@ class GridSignalBotTests(LiveBotTests):
         count = len(sent)
         self.bot.job_grid()  # same signal again: no second alert, no second bot
         self.assertEqual(len(self.bot.telegram.sent), count)
-        self.assertIn("SOL-USDT", self.bot.handle(self.message("/radar")))
+        listing = self.bot.handle(self.message("/radar"))
+        self.assertIn("1 SOL    150 140,27 163,19   90", listing)  # entry table, best score first
         self.assertIn("Grid sinyali taraması", self.bot.handle(self.message("/durum")))
 
     def test_digest_twice_a_day_with_closest_candidates_and_morning_early_longs(self):
@@ -854,7 +856,7 @@ class GridSignalBotTests(LiveBotTests):
             self.assertEqual(len(self.bot.telegram.sent), expect)
         morning, evening = (text for _, text in self.bot.telegram.sent)
         self.assertIn("GRID ÖZETİ", morning)
-        self.assertIn("✅ SOL-USDT", morning)
+        self.assertIn("<pre># Coin   Alt    Üst Grid  Adım\n1 SOL  144,6 155,42   11 %0,63</pre>", morning)
         self.assertIn("ZEC-USDT 7/8 kural", morning)
         self.assertIn("Açık TEST botu: 1", morning)
         self.assertIn("BABY-USDT 83", morning)
@@ -869,6 +871,23 @@ class GridSignalBotTests(LiveBotTests):
         self.bot.job_early()
         self.assertEqual(self.bot.telegram.sent, [])
         self.assertIn("BABY-USDT", self.bot.handle(self.message("/erkenlong")))
+
+    def test_tables_go_out_in_html_mode_and_long_ones_fall_back_to_plain_text(self):
+        from okx_grid.live_bot import TelegramAPI
+        from okx_grid.live_reports import Html, esc, price, table
+        sent = []
+        api = TelegramAPI("t:1", transport=lambda url, body, timeout: (sent.append(body), {"ok": True, "result": {}})[1])
+        api.send(5, Html("<pre>" + esc("a<b & c") + "</pre>"))
+        self.assertEqual((sent[-1]["parse_mode"], sent[-1]["text"]), ("HTML", "<pre>a&lt;b &amp; c</pre>"))
+        api.send(5, Html("<b>x</b> " + esc("1 < 2") + "y" * 4000))
+        self.assertNotIn("parse_mode", sent[-1])
+        self.assertTrue(sent[-2]["text"].startswith("x 1 < 2"))
+        api.send(5, "düz metin")
+        self.assertNotIn("parse_mode", sent[-1])
+        self.assertEqual([price(v) for v in (292.884, 0.0360801, 7.429, 0.0000068123, 64000.7)],
+                         ["292,88", "0,03608", "7,429", "0,0000068123", "64001"])
+        self.assertEqual(table(["#", "Coin", "Alt"], [["1", "A", "1,5"], ["10", "LONG", "22"]]),
+                         "<pre> # Coin Alt\n 1 A    1,5\n10 LONG  22</pre>")
 
     def test_with_automation_off_the_signal_is_only_an_alert(self):
         self.bot.grid.set_auto(False)
