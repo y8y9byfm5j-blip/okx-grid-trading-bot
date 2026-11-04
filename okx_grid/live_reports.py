@@ -71,6 +71,7 @@ def help_text(mode):
         "/rotasyon — ana para nereden çıkıp nereye gidiyor",
         "/erkenlong — büyük yükseliş öncesi birikim adayları",
         "/gridsinyal (veya /radar) — yükselip yataya geçen, hacmi soğuyan coinler ve grid aralıkları",
+        "/ozet — grid özeti (her gün 09:00 ve 18:00'de kendiliğinden gelir)",
         "/grid COIN — o coin için grid sinyali: uygun mu, aralık, grid sayısı",
         "/analiz COIN — /grid + para akışı + erken long skoru",
         "/botlar (veya /paper) — açık/kapanan grid botları ve kâr/zarar",
@@ -140,13 +141,6 @@ def early_text(scan, top=10):
     return "\n".join(lines)
 
 
-def early_alert(row):
-    return "\n".join([f"🚀 ERKEN LONG UYARISI: {row['instrument']} — skor {row['score']}",
-                      *("• " + t for t in row["reasons"][:5]),
-                      f"7g {pct(row['ret_7d'])} | 30g {pct(row['ret_30d'], 0)} | hacim {times(row['volume_ratio'])}",
-                      "Bilgi amaçlıdır; otomatik işlem açılmaz."])
-
-
 def num(value):
     return f"{float(value):.6g}".replace(".", ",")
 
@@ -182,6 +176,32 @@ def range_alert(row, auto=False):
     lines = [f"📐 GRID SİNYALİ: {row['instrument']} — skor {row['score']}", *_plan_lines(row),
              *("• " + t for t in row["reasons"][:5])]
     lines.append("TEST botu otomatik açılır (gerçek emir yok)." if auto else "Bilgi amaçlıdır; otomatik işlem açılmaz.")
+    return "\n".join(lines)
+
+
+def digest_text(scan, bots, *, at_ms, early=()):
+    """Twice-daily grid summary: what passed, what came closest, open test bots, early longs (morning)."""
+    lines = [f"📋 GRID ÖZETİ — {when(at_ms)}"]
+    if not scan:
+        lines.append("Grid taraması henüz tamamlanmadı.")
+    else:
+        took = f" ({scan['seconds']:g} sn)".replace(".", ",") if scan.get("seconds") is not None else ""
+        picks = [r for r in scan["results"] if r["label"] in {"GÜÇLÜ", "İZLE"}][:5]
+        lines.append(f"Son tarama {when(scan['at_ms'])}{took} | {scan['scanned']} coin | uygun: {len(picks)}")
+        for r in picks:
+            p = r["plan"]
+            lines.append(f"✅ {r['instrument']} skor {r['score']}: {num(p['lower'])} – {num(p['upper'])}, "
+                         f"{p['grids']} grid, adım {pct(p['step_pct'], 2)}")
+        if not picks:
+            lines.append("Şu an kriterleri sağlayan coin yok. BEKLE.")
+        near = scan.get("near") or []
+        if near:
+            lines.append("🔎 Kritere en yakın:")
+            lines += [f"• {r['instrument']} {r['passed']}/8 kural — {r['reasons'][0]}" for r in near]
+    lines.append(f"🤖 Açık TEST botu: {len(bots['active'])} | gerçekleşen K/Z """ + f"{bots['realized_pnl']:.2f}".replace(".", ",") + " USDT")
+    if early:
+        lines.append("🚀 Erken long (bilgi): " + ", ".join(f"{r['instrument']} {r['score']}" for r in early)
+                     + " — ayrıntı /erkenlong")
     return "\n".join(lines)
 
 

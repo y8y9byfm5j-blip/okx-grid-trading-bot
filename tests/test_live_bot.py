@@ -719,6 +719,16 @@ class RangeGridTests(unittest.TestCase):
         with self.assertRaises(TradingError):
             range_grid.range_features(daily([100] * 30))
 
+    def test_every_rule_is_reported_with_its_value(self):
+        from okx_grid import range_grid
+        import math
+        closes = [100] * 50 + [100 + 15 * (i + 1) / 30 for i in range(30)] + [115 + 3 * math.sin(i * 0.9) for i in range(20)]
+        f = range_grid.range_features(daily(closes, [2000] * 50 + [6000] * 30 + [4000] * 20))
+        failed = [text for ok, text in range_grid.checks(f) if not ok]
+        self.assertEqual(len(failed), 1)
+        self.assertIn("en az %20", failed[0])
+        self.assertEqual(f["passed"], len(range_grid.RULES) - 1)
+
     def test_scanner_filters_the_universe_and_ranks(self):
         from okx_grid.range_grid import RangeGridScanner
         scanner = RangeGridScanner(CandleReader(sideways_series()), clock_ms=lambda: 5)
@@ -826,6 +836,39 @@ class GridSignalBotTests(LiveBotTests):
         self.assertEqual(len(self.bot.telegram.sent), count)
         self.assertIn("SOL-USDT", self.bot.handle(self.message("/radar")))
         self.assertIn("Grid sinyali taraması", self.bot.handle(self.message("/durum")))
+
+    def test_digest_twice_a_day_with_closest_candidates_and_morning_early_longs(self):
+        from datetime import datetime, timedelta, timezone
+        tr = timezone(timedelta(hours=3))
+        at = lambda h, m=0: int(datetime(2026, 11, 4, h, m, tzinfo=tr).timestamp() * 1000)
+        self.bot.job_grid()
+        self.bot.grid._set_meta("range_scan", {**self.bot.range_scanner.last, "near": [
+            {"instrument": "ZEC-USDT", "passed": 7, "reasons": ["öncesinde belirgin yükseliş yok (%19, en az %20)"]}]})
+        self.bot.range_scanner.last = None  # read back what a restart would see
+        self.bot.grid._set_meta("early_scan", {"at_ms": 1, "scanned": 2, "results": [
+            {"instrument": "BABY-USDT", "score": 83}, {"instrument": "DOS-USDT", "score": 60}]})
+        self.bot.telegram.sent.clear()
+        for clock, expect in ((at(8, 59), 0), (at(9, 5), 1), (at(9, 50), 1), (at(12), 1), (at(18, 1), 2)):
+            self.bot.clock_ms = lambda c=clock: c
+            self.bot.job_digest()
+            self.assertEqual(len(self.bot.telegram.sent), expect)
+        morning, evening = (text for _, text in self.bot.telegram.sent)
+        self.assertIn("GRID ÖZETİ", morning)
+        self.assertIn("✅ SOL-USDT", morning)
+        self.assertIn("ZEC-USDT 7/8 kural", morning)
+        self.assertIn("Açık TEST botu: 1", morning)
+        self.assertIn("BABY-USDT 83", morning)
+        self.assertNotIn("DOS-USDT", morning)
+        self.assertNotIn("Erken long", evening)  # early longs only in the morning, and once per 3 days
+        self.assertIn("GRID ÖZETİ", self.bot.handle(self.message("/ozet")))
+
+    def test_early_scan_sends_no_message_of_its_own(self):
+        self.bot.scanner.scan = lambda: {"at_ms": 1, "scanned": 1, "results": [
+            {"instrument": "BABY-USDT", "score": 90, "label": "GÜÇLÜ", "reasons": [], "ret_7d": 0.1,
+             "ret_30d": 0.1, "volume_ratio": 2, "price": 1}]}
+        self.bot.job_early()
+        self.assertEqual(self.bot.telegram.sent, [])
+        self.assertIn("BABY-USDT", self.bot.handle(self.message("/erkenlong")))
 
     def test_with_automation_off_the_signal_is_only_an_alert(self):
         self.bot.grid.set_auto(False)

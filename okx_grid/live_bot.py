@@ -6,6 +6,7 @@ getUpdates consumer for its bot token. GRID_EXECUTION=paper (default) never
 calls OKX private endpoints; GRID_EXECUTION=live requires OKX TR API keys.
 """
 from dataclasses import dataclass, replace
+from datetime import datetime
 from decimal import Decimal
 import http.client
 import json
@@ -23,7 +24,7 @@ from urllib.request import HTTPSHandler, Request, build_opener
 from .domain import TradingError
 from .early_long import STRONG, EarlyLongScanner, features, score
 from .grid_manager import GridBotManager, GridLimits
-from .live_reports import (bots_text, early_alert, early_text, event_text, help_text, range_alert, range_analysis,
+from .live_reports import (TR_TIME, bots_text, digest_text, early_text, event_text, help_text, range_alert, range_analysis,
                            range_text, reason, rotation_text, usd, when)
 from .range_grid import STRONG as RANGE_STRONG, RangeGridScanner, signal_decision
 from .rotation import RotationTracker
@@ -240,6 +241,8 @@ class LiveBot:
             return text
         if name in {"/gridsinyal", "/sinyal", "/radar"}:
             return range_text(self.last_range())
+        if name in {"/ozet", "/özet"}:
+            return self.digest()
         if name in {"/botlar", "/paper"}:
             return bots_text(self.grid.summary(), self.grid.closed())
         if name == "/durum":
@@ -330,17 +333,31 @@ class LiveBot:
         self.rotation.collect_flows()
 
     def job_early(self):
+        # No message of its own: new strong candidates go into the morning grid summary.
         scan = self.scanner.scan()
         self.grid._set_meta("early_scan", {**scan, "results": scan["results"][:40]})
-        now = self.clock_ms()
-        sent = self.grid._meta("early_alerts", {})
-        for row in scan["results"]:
-            if row["score"] < STRONG:
-                break
-            if now - sent.get(row["instrument"], 0) > 3 * 86_400_000:
-                self.notify(early_alert(row))
-                sent[row["instrument"]] = now
-        self.grid._set_meta("early_alerts", {k: v for k, v in sent.items() if now - v < 7 * 86_400_000})
+
+    DIGEST_HOURS = (9, 18)  # Turkey time
+
+    def digest(self, *, with_early=False):
+        early = []
+        if with_early:
+            scan, now = self.last_scan(), self.clock_ms()
+            sent = self.grid._meta("early_alerts", {})
+            early = [r for r in (scan or {}).get("results", []) if r["score"] >= STRONG
+                     and now - sent.get(r["instrument"], 0) > 3 * 86_400_000][:3]
+            sent.update({r["instrument"]: now for r in early})
+            self.grid._set_meta("early_alerts", {k: v for k, v in sent.items() if now - v < 7 * 86_400_000})
+        return digest_text(self.last_range(), self.grid.summary(), at_ms=self.clock_ms(), early=early)
+
+    def job_digest(self):
+        """Grid summary at 09:00 and 18:00; a restart within two hours of a slot still sends it once."""
+        now = datetime.fromtimestamp(self.clock_ms() / 1000, TR_TIME)
+        for hour in self.DIGEST_HOURS:
+            slot = now.strftime("%Y-%m-%d-") + str(hour)
+            if hour <= now.hour < hour + 2 and self.grid._meta("digest_sent") != slot:
+                self.grid._set_meta("digest_sent", slot)
+                self.notify(self.digest(with_early=hour == self.DIGEST_HOURS[0]))
 
     def job_reconcile(self):
         for event in self.grid.reconcile():
@@ -374,7 +391,8 @@ class LiveBot:
             self.notify(event_text({"kind": "OPENED", "bot": bot}, self.s.execution))
 
     JOBS = (("job_rotation", 15 * 60, 0), ("job_flows", 60 * 60, 45), ("job_early", 4 * 3600, 0),
-            ("job_reconcile", 2 * 60, 0), ("job_grid", 60 * 60, 0))  # (method, seconds between runs, first delay)
+            ("job_reconcile", 2 * 60, 0), ("job_grid", 60 * 60, 0),
+            ("job_digest", 5 * 60, 90))  # (method, seconds between runs, first delay)
 
     def _job_loop(self, name, every, delay):
         """One job on its own thread, so a slow job never holds up the others."""

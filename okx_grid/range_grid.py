@@ -82,30 +82,36 @@ def range_features(daily, price=None):
                  "up_share": up_volume / (up_volume + down_volume) if up_volume + down_volume > 0 else 0.5,
                  "above_sma50": now_price / sma50 - 1, "close": now_price,
                  "ret_30d": now_price / close[-31] - 1}
-        if gate(found) is None and best is None:
-            best = found
-        if best is None and k == RANGE_DAYS[-1]:
-            best = found  # nothing fits: keep the shortest window for the explanation
+        found["passed"] = sum(ok for ok, _ in checks(found))
+        if best is None or found["passed"] > best["passed"]:
+            best = found  # the window that fits best; a full match ends the search at the longest one
+        if best["passed"] == len(RULES):
+            break
     return best
+
+
+RULES = ("runup", "trend", "narrow", "wide", "drift", "position", "loud", "quiet")
+
+
+def checks(f):
+    """Each hard rule as (passed, explanation with the measured value), in RULES order."""
+    width = f["width"] * 100
+    return [
+        (f["runup"] >= 0.20, "öncesinde belirgin yükseliş yok (%{:.0f}, en az %20)".format(f["runup"] * 100)),
+        (f["above_sma50"] >= -0.03,
+         "yükseliş trendi bozulmuş (50 günlük ortalamanın %{:.0f} altında)".format(-f["above_sma50"] * 100)),
+        (f["width"] >= 0.04, "yatay bant çok dar (%{:.1f}, en az %4)".format(width)),
+        (f["width"] <= 0.20, "bant çok geniş, yatay değil (%{:.0f}, en çok %20)".format(width)),
+        (f["drift"] <= 0.45, "bant içinde net yön var, yatay değil"),
+        (0.10 <= f["position"] <= 0.90, "fiyat bandın kenarında (kırılım/kopuş riski)"),
+        (f["cooling"] <= 1.05, "bantta hacim yükselişteki hacimden büyük ({:.1f} katı)".format(f["cooling"])),
+        (f["cooling"] >= 0.25 and f["range_quote_volume"] >= 300_000, "bantta hacim çok zayıfladı"),
+    ]
 
 
 def gate(f):
     """First hard rule the facts fail, or None when the pattern is present."""
-    if f["runup"] < 0.20:
-        return "öncesinde belirgin yükseliş yok"
-    if f["above_sma50"] < -0.03:
-        return "yükseliş trendi bozulmuş (50 günlük ortalamanın altında)"
-    if not 0.04 <= f["width"] <= 0.20:
-        return "yatay bant çok dar" if f["width"] < 0.04 else "bant çok geniş, yatay değil"
-    if f["drift"] > 0.45:
-        return "bant içinde net yön var, yatay değil"
-    if not 0.10 <= f["position"] <= 0.90:
-        return "fiyat bandın kenarında (kırılım/kopuş riski)"
-    if f["cooling"] > 1.05:
-        return "bantta hacim yükselişteki hacimden büyük"
-    if f["cooling"] < 0.25 or f["range_quote_volume"] < 300_000:
-        return "bantta hacim çok zayıfladı"
-    return None
+    return next((text for ok, text in checks(f) if not ok), None)
 
 
 def score(f):
@@ -191,7 +197,7 @@ class RangeGridScanner:
         points, label, reasons = score(f)
         row = {"instrument": instrument, "score": points, "label": label, "reasons": reasons,
                "price": f["close"], "k": f["k"], "width": f["width"], "runup": f["runup"],
-               "cooling": f["cooling"], "position": f["position"]}
+               "cooling": f["cooling"], "position": f["position"], "passed": f["passed"]}
         if label in {"GÜÇLÜ", "İZLE", "ZAYIF"}:
             row["plan"] = grid_plan(f, self.reader.candles(instrument, "4H", 120))
             if row["plan"]["step_net_pct"] <= 0 or row["plan"]["crossings"] < 4:
@@ -213,9 +219,10 @@ class RangeGridScanner:
                 errors += 1
                 continue
             results.append(row)
-        results.sort(key=lambda r: r["score"], reverse=True)
+        results.sort(key=lambda r: (r["score"], r["passed"], r["runup"]), reverse=True)
+        misses = [r for r in results if r["label"] == "UYMUYOR" and r["passed"] >= len(RULES) - 2]
         self.last = {"at_ms": self.clock_ms(), "scanned": len(results), "errors": errors, "results": results,
-                     "seconds": round(time.monotonic() - started, 1)}
+                     "near": misses[:3], "seconds": round(time.monotonic() - started, 1)}
         return self.last
 
 
