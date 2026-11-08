@@ -265,7 +265,8 @@ def bots_text(summary, closed):
     lines = [f"🧱 GRID BOTLARI — {'GERÇEK (OKX TR)' if summary['mode'] == 'live' else 'TEST (paper)'}",
              f"Otomatik: {'AÇIK' if summary['auto'] else 'KAPALI'}" + (f" | DURDURULDU: {summary['halt']}" if summary["halt"] else ""),
              f"Kullanılan: {summary['reserved']} / {limits.total_capital} USDT | bot {len(summary['active'])}/{limits.max_bots}",
-             f"Gerçekleşen K/Z: {summary['realized_pnl']:.2f} USDT (sınır −{limits.max_realized_loss})", ""]
+             "Gerçekleşen K/Z: " + f"{summary['realized_pnl']:.2f}".replace(".", ",")
+             + f" USDT (sınır −{limits.max_realized_loss})", ""]
     if not summary["active"]:
         lines.append("Açık bot yok.")
     for b in summary["active"]:

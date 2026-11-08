@@ -327,7 +327,7 @@ class LiveBot:
             f"otomatik {'AÇIK' if summary['auto'] else 'KAPALI'}" + (f" | DURDURULDU {summary['halt']}" if summary["halt"] else ""),
             f"Limitler: toplam {limits.total_capital} USDT, bot başı {limits.bot_capital}, en fazla {limits.max_bots} bot, "
             f"toplam zarar sınırı {limits.max_realized_loss} USDT",
-            f"Açık bot: {len(summary['active'])} | kullanılan {summary['reserved']} USDT | K/Z {summary['realized_pnl']:.2f}",
+            f"Açık bot: {len(summary['active'])} | kullanılan {summary['reserved']} USDT | K/Z " + f"{summary['realized_pnl']:.2f}".replace(".", ","),
             f"Grid sinyali taraması: {when(rng['at_ms']) if rng else 'bekleniyor'}" + self.took("job_grid"),
             f"Para akışı: {when(flows_at) if flows_at else 'bekleniyor'} | Erken long: {when(scan['at_ms']) if scan else 'bekleniyor'}" + self.took("job_early"),
             "Kaynak: tr.okx.com"])
